@@ -107,6 +107,9 @@ def _snapshots_from_event(event: dict[str, Any], series_ticker: str) -> list[Mar
                 updated_ts=_parse_ts(market.get("updated_time") or event.get("last_updated_ts")),
                 status=status or "open",
                 series_ticker=str(event.get("series_ticker") or series_ticker),
+                occurrence_ts=_parse_ts(
+                    market.get("occurrence_datetime") or market.get("expected_expiration_time")
+                ),
             )
         )
     return [s for s in out if s.ticker]

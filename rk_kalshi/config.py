@@ -33,6 +33,9 @@ class AppConfig:
     max_spread_cents: float = 8.0
     stale_mid_seconds: float = 180.0
     min_volume: float = 0.0
+    live_matches_only: bool = True
+    live_pre_start_minutes: float = 10.0
+    live_max_hours: float = 12.0
     fill_log_csv: Path = Path("data/fills.csv")
     fill_log_jsonl: Path = Path("data/fills.jsonl")
     state_path: Path = Path("data/paper_state.json")
@@ -79,6 +82,9 @@ def config_from_mapping(raw: dict[str, Any]) -> AppConfig:
         max_spread_cents=float(signal.get("max_spread_cents", 8.0)),
         stale_mid_seconds=float(signal.get("stale_mid_seconds", 180.0)),
         min_volume=float(signal.get("min_volume", 0.0)),
+        live_matches_only=bool(signal.get("live_matches_only", True)),
+        live_pre_start_minutes=float(signal.get("live_pre_start_minutes", 10.0)),
+        live_max_hours=float(signal.get("live_max_hours", 12.0)),
         fill_log_csv=Path(paper.get("fill_log_csv", "data/fills.csv")),
         fill_log_jsonl=Path(paper.get("fill_log_jsonl", "data/fills.jsonl")),
         state_path=Path(paper.get("state_path", "data/paper_state.json")),

@@ -1,4 +1,5 @@
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from unittest.mock import MagicMock
@@ -22,6 +23,7 @@ def _dislocated() -> MarketSnapshot:
         updated_ts=1_700_000_000.0,
         status="active",
         series_ticker="KXATPMATCH",
+        occurrence_ts=time.time(),
     )
 
 
@@ -69,11 +71,37 @@ class RunnerTests(unittest.TestCase):
             last_price=0.50,
             volume=10.0,
             updated_ts=1_700_000_000.0,
+            occurrence_ts=time.time(),
         )
         client = MagicMock()
         client.list_tennis_markets.return_value = ([flat], 9.0)
         runner = PaperRunner(self.cfg, client=client)
         self.assertEqual(runner.run_once(), [])
+
+    def test_run_once_skips_upcoming_when_live_matches_only(self):
+        upcoming = MarketSnapshot(
+            ticker="KXATPMATCH-EDGE-AAA",
+            event_ticker="KXATPMATCH-EDGE",
+            event_name="Edge vs Flat",
+            title="Edge wins",
+            yes_bid=0.395,
+            yes_ask=0.405,
+            last_price=0.40,
+            volume=50.0,
+            updated_ts=1_700_000_000.0,
+            status="active",
+            series_ticker="KXATPMATCH",
+            occurrence_ts=time.time() + 6 * 3600,
+        )
+        seeded = new_state(self.cfg, day="2026-09-06")
+        seeded.ema[upcoming.ticker] = 0.60
+        save_state(self.cfg, seeded)
+        client = MagicMock()
+        client.list_tennis_markets.return_value = ([upcoming], 11.0)
+        runner = PaperRunner(self.cfg, client=client)
+        self.assertEqual(runner.run_once(), [])
+        self.assertEqual(runner.last_scan["live"], 0)
+        self.assertEqual(runner.last_scan["open"], 1)
 
 
 if __name__ == "__main__":

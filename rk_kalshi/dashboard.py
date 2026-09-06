@@ -76,6 +76,7 @@ class StartRequest(BaseModel):
     sleep_s: float | None = Field(default=None, ge=0.0, le=MAX_SLEEP_S)
     continuous: bool = True
     cycles: int | None = Field(default=None, ge=1, le=MAX_CYCLES)
+    live_matches_only: bool = True
     live: bool | None = None
     mode: str | None = None
 
@@ -186,8 +187,18 @@ class RunController:
                 if not continuous and index >= cycles:
                     break
                 label = f"{index + 1}" if continuous else f"{index + 1}/{cycles}"
-                self._log(f"cycle {label}: scanning open tennis markets")
+                self._log(f"cycle {label}: scanning tennis markets")
                 fills = self.runner.run_once()
+                scan = getattr(self.runner, "last_scan", None) or {}
+                if scan:
+                    self._log(
+                        f"  live {scan.get('live', 0)} / open {scan.get('open', 0)} "
+                        f"(live-matches-only={self.cfg.live_matches_only})"
+                    )
+                    if self.cfg.live_matches_only and not scan.get("live"):
+                        nxt = scan.get("next_event_name") or "none scheduled"
+                        when = scan.get("next_start_iso") or "n/a"
+                        self._log(f"  no in-play matches — next: {nxt} at {when}")
                 with self._lock:
                     self.cycles_done = index + 1
                     self.fills_this_run += len(fills)
@@ -269,6 +280,7 @@ class DashboardService:
         max_dollars_per_ticker: float,
         daily_loss_limit: float,
         cycle_sleep_s: float | None = None,
+        live_matches_only: bool = True,
     ) -> dict[str, Any]:
         sleep_s = self.cfg.cycle_sleep_s if cycle_sleep_s is None else cycle_sleep_s
         cfg = replace(
@@ -277,6 +289,7 @@ class DashboardService:
             max_dollars_per_ticker=float(max_dollars_per_ticker),
             daily_loss_limit=float(daily_loss_limit),
             cycle_sleep_s=float(sleep_s),
+            live_matches_only=bool(live_matches_only),
             live_enabled=False,
         )
         self.bind_config(cfg)
@@ -289,6 +302,7 @@ class DashboardService:
             "max_dollars_per_ticker": cfg.max_dollars_per_ticker,
             "daily_loss_limit": cfg.daily_loss_limit,
             "cycle_sleep_s": cfg.cycle_sleep_s,
+            "live_matches_only": cfg.live_matches_only,
             "can_size_up": False,
             "allow_size_up": cfg.allow_size_up,
             "state": applied,
@@ -321,6 +335,7 @@ def _cfg_from_session(cfg: AppConfig) -> AppConfig:
         max_dollars_per_ticker=float(raw.get("max_dollars_per_ticker", cfg.max_dollars_per_ticker)),
         daily_loss_limit=float(raw.get("daily_loss_limit", cfg.daily_loss_limit)),
         cycle_sleep_s=float(raw.get("cycle_sleep_s", cfg.cycle_sleep_s)),
+        live_matches_only=bool(raw.get("live_matches_only", cfg.live_matches_only)),
         live_enabled=False,
     )
 
@@ -331,6 +346,7 @@ def _persist_session(cfg: AppConfig, config_path: Path | None) -> dict[str, bool
         "max_dollars_per_ticker": cfg.max_dollars_per_ticker,
         "daily_loss_limit": cfg.daily_loss_limit,
         "cycle_sleep_s": cfg.cycle_sleep_s,
+        "live_matches_only": cfg.live_matches_only,
         "paper_mode": True,
         "live_enabled": False,
     }
@@ -419,6 +435,8 @@ def _market_payload(market: MarketSnapshot) -> dict[str, Any]:
         "volume": market.volume,
         "status": market.status,
         "series_ticker": market.series_ticker,
+        "occurrence_ts": market.occurrence_ts,
+        "in_play": market.is_in_play(time.time()),
     }
 
 
@@ -466,6 +484,7 @@ def _status_payload(service: DashboardService) -> dict[str, Any]:
         "cycle_sleep_s": service.cfg.cycle_sleep_s,
         "series_tickers": list(service.cfg.series_tickers),
         "edge_threshold_cents": service.cfg.edge_threshold_cents,
+        "live_matches_only": service.cfg.live_matches_only,
         "run": service.controller.snapshot(),
     }
 
@@ -568,6 +587,7 @@ def create_app(
             max_dollars_per_ticker=body.max_dollars_per_ticker,
             daily_loss_limit=body.daily_loss_limit,
             cycle_sleep_s=body.sleep_s,
+            live_matches_only=body.live_matches_only,
         )
         continuous = bool(body.continuous) or body.cycles is None
         cycles = 1 if continuous else int(body.cycles or 1)
