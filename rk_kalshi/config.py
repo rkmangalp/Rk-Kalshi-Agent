@@ -29,6 +29,7 @@ class AppConfig:
     fee_multiplier: float = 1.0
     ema_alpha: float = 0.30
     last_trade_weight: float = 0.50
+    max_last_dislocation_cents: float = 8.0
     max_spread_cents: float = 8.0
     stale_mid_seconds: float = 180.0
     min_volume: float = 0.0
@@ -74,6 +75,7 @@ def config_from_mapping(raw: dict[str, Any]) -> AppConfig:
         fee_multiplier=float(signal.get("fee_multiplier", 1.0)),
         ema_alpha=float(signal.get("ema_alpha", 0.30)),
         last_trade_weight=float(signal.get("last_trade_weight", 0.50)),
+        max_last_dislocation_cents=float(signal.get("max_last_dislocation_cents", 8.0)),
         max_spread_cents=float(signal.get("max_spread_cents", 8.0)),
         stale_mid_seconds=float(signal.get("stale_mid_seconds", 180.0)),
         min_volume=float(signal.get("min_volume", 0.0)),

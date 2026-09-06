@@ -59,6 +59,10 @@ class TennisSignalEngine:
 
         last = market.last_price if market.last_price > 0 else None
         if last is not None:
+            last_gap_cents = abs(last - mid) * 100.0
+            if last_gap_cents > self.cfg.max_last_dislocation_cents:
+                last = None
+        if last is not None:
             fair = (
                 self.cfg.last_trade_weight * last
                 + (1.0 - self.cfg.last_trade_weight) * ema
@@ -66,7 +70,7 @@ class TennisSignalEngine:
             last_note = f"last={last * 100:.2f}¢"
         else:
             fair = ema
-            last_note = "last=n/a"
+            last_note = "last=n/a (missing or stale vs mid)"
 
         fee_cents = quadratic_fee_cents(
             mid,

@@ -36,6 +36,8 @@ signal:
   fee_multiplier: 1.0
   ema_alpha: 0.30
   last_trade_weight: 0.50
+  # Ignore last prints this far from mid — usually a stale tape, not edge.
+  max_last_dislocation_cents: 8.0
   max_spread_cents: 8.0
   stale_mid_seconds: 180
   min_volume: 0.0

@@ -28,9 +28,10 @@ class SignalEngineTests(unittest.TestCase):
         self.cfg = AppConfig(edge_threshold_cents=3.0, max_spread_cents=8.0)
         self.engine = TennisSignalEngine(self.cfg)
 
-    def test_buy_when_last_print_is_well_above_mid_after_costs(self):
-        # mid=0.40, last=0.52 → fair ≈ 0.46, raw 6¢ minus ~1¢ spread + ~1.7¢ fee
-        market = _market(yes_bid=0.395, yes_ask=0.405, last_price=0.52)
+    def test_buy_when_ema_is_well_above_mid_after_costs(self):
+        # Prior EMA above a tight mid; last stays near mid so it is not stale.
+        self.engine.load_ema({"KXATPMATCH-26SEP06FOO-FOO": 0.60})
+        market = _market(yes_bid=0.395, yes_ask=0.405, last_price=0.40)
         signal = self.engine.evaluate_one(market, now=1_000_000.0)
         self.assertIsNotNone(signal)
         self.assertEqual(signal.side, "buy")
@@ -42,8 +43,9 @@ class SignalEngineTests(unittest.TestCase):
         self.assertIn("BUY YES", signal.edge_thesis)
         self.assertIn("net edge", signal.edge_thesis)
 
-    def test_sell_when_last_print_is_well_below_mid_after_costs(self):
-        market = _market(yes_bid=0.595, yes_ask=0.605, last_price=0.48)
+    def test_sell_when_ema_is_well_below_mid_after_costs(self):
+        self.engine.load_ema({"KXATPMATCH-26SEP06FOO-FOO": 0.40})
+        market = _market(yes_bid=0.595, yes_ask=0.605, last_price=0.60)
         signal = self.engine.evaluate_one(market, now=1_000_000.0)
         self.assertIsNotNone(signal)
         self.assertEqual(signal.side, "sell")
@@ -52,6 +54,11 @@ class SignalEngineTests(unittest.TestCase):
 
     def test_no_signal_when_last_equals_mid(self):
         market = _market(yes_bid=0.50, yes_ask=0.50, last_price=0.50)
+        self.assertIsNone(self.engine.evaluate_one(market, now=1_000_000.0))
+
+    def test_ignores_stale_last_print_far_from_tight_mid(self):
+        # 20¢ last-vs-mid on a 1¢ book is tape lag, not a 3¢ edge.
+        market = _market(yes_bid=0.690, yes_ask=0.700, last_price=0.490)
         self.assertIsNone(self.engine.evaluate_one(market, now=1_000_000.0))
 
     def test_skips_wide_spread(self):
@@ -67,8 +74,9 @@ class SignalEngineTests(unittest.TestCase):
         self.assertIsNone(self.engine.evaluate_one(market, now=1_000.0))
 
     def test_evaluate_sorts_by_edge_desc(self):
-        strong = _market(ticker="STRONG", yes_bid=0.395, yes_ask=0.405, last_price=0.60)
-        mild = _market(ticker="MILD", yes_bid=0.395, yes_ask=0.405, last_price=0.50)
+        self.engine.load_ema({"STRONG": 0.62, "MILD": 0.50})
+        strong = _market(ticker="STRONG", yes_bid=0.395, yes_ask=0.405, last_price=0.40)
+        mild = _market(ticker="MILD", yes_bid=0.395, yes_ask=0.405, last_price=0.40)
         signals = self.engine.evaluate([mild, strong], now=1_000_000.0)
         self.assertGreaterEqual(len(signals), 1)
         self.assertEqual(signals[0].ticker, "STRONG")

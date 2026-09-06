@@ -35,7 +35,8 @@ Kalshi public REST  →  TennisSignalEngine  →  RiskManager  →  PaperExecuti
    half-spread and a Kalshi-style quadratic fee
    (`0.07 × P × (1−P)`, rounded up to the next cent), and emits buy/sell only
    when net edge ≥ `edge_threshold_cents` (default 3¢). Wide or stale mids are
-   skipped.
+   skipped. A last print more than `max_last_dislocation_cents` (default 8¢)
+   from mid is treated as a stale tape, not fair value.
 2. **Paper execution** (`rk_kalshi/execution.py`) fills at the live YES mid.
    `LiveKalshiExecution` always raises; live trading is disabled.
 3. **Risk** (`rk_kalshi/risk.py`): max **$5** notional per ticker (default),

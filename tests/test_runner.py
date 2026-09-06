@@ -6,6 +6,7 @@ from unittest.mock import MagicMock
 from rk_kalshi.config import AppConfig
 from rk_kalshi.models import MarketSnapshot
 from rk_kalshi.runner import PaperRunner
+from rk_kalshi.state import new_state, save_state
 
 
 def _dislocated() -> MarketSnapshot:
@@ -16,7 +17,7 @@ def _dislocated() -> MarketSnapshot:
         title="Edge wins",
         yes_bid=0.395,
         yes_ask=0.405,
-        last_price=0.55,
+        last_price=0.40,
         volume=50.0,
         updated_ts=1_700_000_000.0,
         status="active",
@@ -42,6 +43,9 @@ class RunnerTests(unittest.TestCase):
         self.tmp.cleanup()
 
     def test_run_once_fills_and_persists_when_edge_exists(self):
+        seeded = new_state(self.cfg, day="2026-09-06")
+        seeded.ema["KXATPMATCH-EDGE-AAA"] = 0.60
+        save_state(self.cfg, seeded)
         client = MagicMock()
         client.list_tennis_markets.return_value = ([_dislocated()], 17.0)
         runner = PaperRunner(self.cfg, client=client)
