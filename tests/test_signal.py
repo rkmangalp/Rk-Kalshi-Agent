@@ -1,0 +1,78 @@
+import unittest
+
+from rk_kalshi.config import AppConfig
+from rk_kalshi.models import MarketSnapshot
+from rk_kalshi.signal import TennisSignalEngine
+
+
+def _market(**overrides) -> MarketSnapshot:
+    data = dict(
+        ticker="KXATPMATCH-26SEP06FOO-FOO",
+        event_ticker="KXATPMATCH-26SEP06FOO",
+        event_name="Foo vs Bar",
+        title="Foo wins",
+        yes_bid=0.40,
+        yes_ask=0.42,
+        last_price=0.41,
+        volume=100.0,
+        updated_ts=1_000_000.0,
+        status="active",
+        series_ticker="KXATPMATCH",
+    )
+    data.update(overrides)
+    return MarketSnapshot(**data)
+
+
+class SignalEngineTests(unittest.TestCase):
+    def setUp(self):
+        self.cfg = AppConfig(edge_threshold_cents=3.0, max_spread_cents=8.0)
+        self.engine = TennisSignalEngine(self.cfg)
+
+    def test_buy_when_last_print_is_well_above_mid_after_costs(self):
+        # mid=0.40, last=0.52 → fair ≈ 0.46, raw 6¢ minus ~1¢ spread + ~1.7¢ fee
+        market = _market(yes_bid=0.395, yes_ask=0.405, last_price=0.52)
+        signal = self.engine.evaluate_one(market, now=1_000_000.0)
+        self.assertIsNotNone(signal)
+        self.assertEqual(signal.side, "buy")
+        self.assertGreaterEqual(signal.edge_cents, 3.0)
+        self.assertAlmostEqual(signal.edge_bps, signal.edge_cents * 100.0)
+        self.assertAlmostEqual(signal.fill_price, signal.live_mid)
+        self.assertEqual(signal.match_id, "KXATPMATCH-26SEP06FOO")
+        self.assertEqual(signal.event_name, "Foo vs Bar")
+        self.assertIn("BUY YES", signal.edge_thesis)
+        self.assertIn("net edge", signal.edge_thesis)
+
+    def test_sell_when_last_print_is_well_below_mid_after_costs(self):
+        market = _market(yes_bid=0.595, yes_ask=0.605, last_price=0.48)
+        signal = self.engine.evaluate_one(market, now=1_000_000.0)
+        self.assertIsNotNone(signal)
+        self.assertEqual(signal.side, "sell")
+        self.assertGreaterEqual(signal.edge_cents, 3.0)
+        self.assertIn("SELL YES", signal.edge_thesis)
+
+    def test_no_signal_when_last_equals_mid(self):
+        market = _market(yes_bid=0.50, yes_ask=0.50, last_price=0.50)
+        self.assertIsNone(self.engine.evaluate_one(market, now=1_000_000.0))
+
+    def test_skips_wide_spread(self):
+        market = _market(yes_bid=0.30, yes_ask=0.50, last_price=0.60)
+        self.assertIsNone(self.engine.evaluate_one(market, now=1_000_000.0))
+
+    def test_skips_one_sided_book(self):
+        market = _market(yes_bid=0.0, yes_ask=0.40, last_price=0.55)
+        self.assertIsNone(self.engine.evaluate_one(market, now=1_000_000.0))
+
+    def test_skips_stale_wideish_mid(self):
+        market = _market(yes_bid=0.40, yes_ask=0.44, last_price=0.55, updated_ts=1.0)
+        self.assertIsNone(self.engine.evaluate_one(market, now=1_000.0))
+
+    def test_evaluate_sorts_by_edge_desc(self):
+        strong = _market(ticker="STRONG", yes_bid=0.395, yes_ask=0.405, last_price=0.60)
+        mild = _market(ticker="MILD", yes_bid=0.395, yes_ask=0.405, last_price=0.50)
+        signals = self.engine.evaluate([mild, strong], now=1_000_000.0)
+        self.assertGreaterEqual(len(signals), 1)
+        self.assertEqual(signals[0].ticker, "STRONG")
+
+
+if __name__ == "__main__":
+    unittest.main()
