@@ -24,7 +24,7 @@ from pydantic import BaseModel, Field, model_validator
 from rk_kalshi.client import KalshiPublicClient
 from rk_kalshi.config import AppConfig, load_config
 from rk_kalshi.journal import read_fills, summarize_pnl
-from rk_kalshi.models import MarketSnapshot
+from rk_kalshi.models import MarketSnapshot, select_bitcoin_tradeable
 from rk_kalshi.risk import RiskManager
 from rk_kalshi.runner import PaperRunner
 from rk_kalshi.schema import FILL_FIELDS
@@ -563,8 +563,14 @@ def create_app(
             snapshots, latency_ms = service.client.list_markets()
         except Exception as exc:  # noqa: BLE001 — HTTP client / parse errors
             raise HTTPException(status_code=502, detail=f"Kalshi public API error: {exc}") from exc
-        payload = [_market_payload(m) for m in snapshots]
-        payload.sort(key=lambda row: (row["event_name"], row["ticker"]))
+        tennis = [m for m in snapshots if m.asset_class != "bitcoin"]
+        bitcoin = select_bitcoin_tradeable(
+            snapshots,
+            near_money_low=service.cfg.bitcoin_near_money_low,
+            near_money_high=service.cfg.bitcoin_near_money_high,
+        )
+        payload = [_market_payload(m) for m in tennis + bitcoin]
+        payload.sort(key=lambda row: (0 if row["asset_class"] == "bitcoin" else 1, row["event_name"], row["ticker"]))
         return {
             "count": len(payload),
             "latency_ms": round(float(latency_ms), 3),

@@ -161,6 +161,39 @@ class DashboardApiTests(unittest.TestCase):
         self.assertEqual(row["asset_class"], "tennis")
         self.client.list_markets.assert_called()
 
+    def test_markets_keeps_near_money_bitcoin_and_drops_lottery_strikes(self):
+        near = MarketSnapshot(
+            ticker="KXBTC15M-26SEP060015-15",
+            event_ticker="KXBTC15M-26SEP060015",
+            event_name="BTC 15 min",
+            title="Up",
+            yes_bid=0.540,
+            yes_ask=0.550,
+            last_price=0.545,
+            volume=80.0,
+            updated_ts=1_700_000_000.0,
+            status="active",
+            series_ticker="KXBTC15M",
+        )
+        far = MarketSnapshot(
+            ticker="KXBTCD-26SEP0601-T70099.99",
+            event_ticker="KXBTCD-26SEP0601",
+            event_name="BTC price",
+            title="Above 70099",
+            yes_bid=0.990,
+            yes_ask=1.000,
+            last_price=0.995,
+            volume=10.0,
+            updated_ts=1_700_000_000.0,
+            status="active",
+            series_ticker="KXBTCD",
+        )
+        self.client.list_markets.return_value = ([near, far], 9.0)
+        response = self.http.get("/api/markets")
+        self.assertEqual(response.status_code, 200)
+        tickers = [row["ticker"] for row in response.json()["markets"]]
+        self.assertEqual(tickers, [near.ticker])
+
     def test_fills_and_pnl_use_locked_schema(self):
         FillJournal(self.cfg.fill_log_csv, self.cfg.fill_log_jsonl).append(_fill())
 
