@@ -122,6 +122,8 @@ class DashboardApiTests(unittest.TestCase):
         self.assertIn("no-store", (response.headers.get("cache-control") or "").lower())
         self.assertIn("starting-cash", response.text)
         self.assertIn("btn-stop", response.text)
+        self.assertIn("btn-clear-logs", response.text)
+        self.assertIn("Clear logs", response.text)
 
     def test_health_and_status_lock_paper_mode(self):
         health = self.http.get("/api/health")
@@ -396,6 +398,20 @@ class DashboardApiTests(unittest.TestCase):
             json={"starting_cash": 80, "trade_bitcoin": False, "trade_tennis": False},
         )
         self.assertEqual(empty.status_code, 400)
+
+    def test_clear_logs_empties_buffer(self):
+        self.http.post("/api/run", json={"cycles": 1, "sleep_s": 0})
+        deadline = time.time() + 4
+        while time.time() < deadline and self.http.get("/api/run").json()["running"]:
+            time.sleep(0.05)
+        before = self.http.get("/api/run").json()["logs"]
+        self.assertGreater(len(before), 0)
+        cleared = self.http.post("/api/logs/clear")
+        self.assertEqual(cleared.status_code, 200)
+        logs = cleared.json()["logs"]
+        self.assertEqual(len(logs), 1)
+        self.assertIn("logs cleared", logs[0])
+        self.assertFalse(any("PAPER MODE ONLY" in line for line in logs))
 
 
 if __name__ == "__main__":
