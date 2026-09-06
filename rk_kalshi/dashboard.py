@@ -77,6 +77,8 @@ class StartRequest(BaseModel):
     continuous: bool = True
     cycles: int | None = Field(default=None, ge=1, le=MAX_CYCLES)
     live_matches_only: bool = True
+    trade_bitcoin: bool = True
+    trade_tennis: bool = True
     live: bool | None = None
     mode: str | None = None
 
@@ -174,8 +176,8 @@ class RunController:
         try:
             if continuous:
                 self._log(
-                    "PAPER MODE ONLY — Start: polling tennis markets until Stop; "
-                    "live orders disabled; can_size_up stays locked"
+                    "PAPER MODE ONLY — Start: polling Bitcoin (buy+sell YES) and "
+                    "tennis until Stop; live orders disabled; can_size_up stays locked"
                 )
             else:
                 self._log(
@@ -187,18 +189,24 @@ class RunController:
                 if not continuous and index >= cycles:
                     break
                 label = f"{index + 1}" if continuous else f"{index + 1}/{cycles}"
-                self._log(f"cycle {label}: scanning tennis markets")
+                self._log(f"cycle {label}: scanning Bitcoin and tennis markets")
                 fills = self.runner.run_once()
                 scan = getattr(self.runner, "last_scan", None) or {}
                 if scan:
                     self._log(
-                        f"  live {scan.get('live', 0)} / open {scan.get('open', 0)} "
-                        f"(live-matches-only={self.cfg.live_matches_only})"
+                        f"  btc {scan.get('bitcoin', 0)} / live tennis {scan.get('live', 0)} "
+                        f"/ open {scan.get('open', 0)} "
+                        f"(live-matches-only={self.cfg.live_matches_only} "
+                        f"btc={self.cfg.trade_bitcoin} tennis={self.cfg.trade_tennis})"
                     )
-                    if self.cfg.live_matches_only and not scan.get("live"):
+                    if (
+                        self.cfg.trade_tennis
+                        and self.cfg.live_matches_only
+                        and not scan.get("live")
+                    ):
                         nxt = scan.get("next_event_name") or "none scheduled"
                         when = scan.get("next_start_iso") or "n/a"
-                        self._log(f"  no in-play matches — next: {nxt} at {when}")
+                        self._log(f"  no in-play tennis — next: {nxt} at {when}")
                 with self._lock:
                     self.cycles_done = index + 1
                     self.fills_this_run += len(fills)
@@ -281,6 +289,8 @@ class DashboardService:
         daily_loss_limit: float,
         cycle_sleep_s: float | None = None,
         live_matches_only: bool = True,
+        trade_bitcoin: bool = True,
+        trade_tennis: bool = True,
     ) -> dict[str, Any]:
         sleep_s = self.cfg.cycle_sleep_s if cycle_sleep_s is None else cycle_sleep_s
         cfg = replace(
@@ -290,6 +300,8 @@ class DashboardService:
             daily_loss_limit=float(daily_loss_limit),
             cycle_sleep_s=float(sleep_s),
             live_matches_only=bool(live_matches_only),
+            trade_bitcoin=bool(trade_bitcoin),
+            trade_tennis=bool(trade_tennis),
             live_enabled=False,
         )
         self.bind_config(cfg)
@@ -303,6 +315,8 @@ class DashboardService:
             "daily_loss_limit": cfg.daily_loss_limit,
             "cycle_sleep_s": cfg.cycle_sleep_s,
             "live_matches_only": cfg.live_matches_only,
+            "trade_bitcoin": cfg.trade_bitcoin,
+            "trade_tennis": cfg.trade_tennis,
             "can_size_up": False,
             "allow_size_up": cfg.allow_size_up,
             "state": applied,
@@ -336,6 +350,8 @@ def _cfg_from_session(cfg: AppConfig) -> AppConfig:
         daily_loss_limit=float(raw.get("daily_loss_limit", cfg.daily_loss_limit)),
         cycle_sleep_s=float(raw.get("cycle_sleep_s", cfg.cycle_sleep_s)),
         live_matches_only=bool(raw.get("live_matches_only", cfg.live_matches_only)),
+        trade_bitcoin=bool(raw.get("trade_bitcoin", cfg.trade_bitcoin)),
+        trade_tennis=bool(raw.get("trade_tennis", cfg.trade_tennis)),
         live_enabled=False,
     )
 
@@ -347,6 +363,8 @@ def _persist_session(cfg: AppConfig, config_path: Path | None) -> dict[str, bool
         "daily_loss_limit": cfg.daily_loss_limit,
         "cycle_sleep_s": cfg.cycle_sleep_s,
         "live_matches_only": cfg.live_matches_only,
+        "trade_bitcoin": cfg.trade_bitcoin,
+        "trade_tennis": cfg.trade_tennis,
         "paper_mode": True,
         "live_enabled": False,
     }
@@ -437,6 +455,7 @@ def _market_payload(market: MarketSnapshot) -> dict[str, Any]:
         "series_ticker": market.series_ticker,
         "occurrence_ts": market.occurrence_ts,
         "in_play": market.is_in_play(time.time()),
+        "asset_class": market.asset_class,
     }
 
 
@@ -482,9 +501,12 @@ def _status_payload(service: DashboardService) -> dict[str, Any]:
         "max_dollars_per_ticker": service.cfg.max_dollars_per_ticker,
         "daily_loss_limit": service.cfg.daily_loss_limit,
         "cycle_sleep_s": service.cfg.cycle_sleep_s,
-        "series_tickers": list(service.cfg.series_tickers),
+        "series_tickers": list(service.cfg.enabled_series_tickers()),
         "edge_threshold_cents": service.cfg.edge_threshold_cents,
         "live_matches_only": service.cfg.live_matches_only,
+        "trade_bitcoin": service.cfg.trade_bitcoin,
+        "trade_tennis": service.cfg.trade_tennis,
+        "bitcoin_series_tickers": list(service.cfg.bitcoin_series_tickers),
         "run": service.controller.snapshot(),
     }
 
@@ -538,7 +560,7 @@ def create_app(
     @app.get("/api/markets")
     def markets() -> dict[str, Any]:
         try:
-            snapshots, latency_ms = service.client.list_tennis_markets()
+            snapshots, latency_ms = service.client.list_markets()
         except Exception as exc:  # noqa: BLE001 — HTTP client / parse errors
             raise HTTPException(status_code=502, detail=f"Kalshi public API error: {exc}") from exc
         payload = [_market_payload(m) for m in snapshots]
@@ -546,7 +568,7 @@ def create_app(
         return {
             "count": len(payload),
             "latency_ms": round(float(latency_ms), 3),
-            "series": list(service.cfg.series_tickers),
+            "series": list(service.cfg.enabled_series_tickers()),
             "paper_mode": True,
             "markets": payload,
         }
@@ -582,12 +604,16 @@ def create_app(
     def start_session(body: StartRequest) -> dict[str, Any]:
         if service.controller.snapshot()["running"]:
             raise HTTPException(status_code=409, detail="paper-run already in progress")
+        if not body.trade_bitcoin and not body.trade_tennis:
+            raise HTTPException(status_code=400, detail="select Bitcoin and/or tennis")
         session = service.apply_session(
             starting_cash=body.starting_cash,
             max_dollars_per_ticker=body.max_dollars_per_ticker,
             daily_loss_limit=body.daily_loss_limit,
             cycle_sleep_s=body.sleep_s,
             live_matches_only=body.live_matches_only,
+            trade_bitcoin=body.trade_bitcoin,
+            trade_tennis=body.trade_tennis,
         )
         continuous = bool(body.continuous) or body.cycles is None
         cycles = 1 if continuous else int(body.cycles or 1)

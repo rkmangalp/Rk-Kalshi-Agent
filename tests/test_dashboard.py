@@ -100,7 +100,7 @@ class DashboardApiTests(unittest.TestCase):
             cycle_sleep_s=15.0,
         )
         self.client = MagicMock()
-        self.client.list_tennis_markets.return_value = ([_market()], 18.5)
+        self.client.list_markets.return_value = ([_market()], 18.5)
         self.app = create_app(self.cfg, client=self.client)
         self.http = _client(self.app)
 
@@ -114,7 +114,8 @@ class DashboardApiTests(unittest.TestCase):
         self.assertIn("no live orders", response.text)
         self.assertNotIn("Place live order", response.text)
         self.assertIn("Start paper trading", response.text)
-        self.assertIn("Live matches only", response.text)
+        self.assertIn("Live tennis matches only", response.text)
+        self.assertIn("Bitcoin (buy and sell YES)", response.text)
         self.assertIn("local time", response.text)
         self.assertIn("starting-cash", response.text)
         self.assertIn("btn-stop", response.text)
@@ -157,7 +158,8 @@ class DashboardApiTests(unittest.TestCase):
         self.assertAlmostEqual(row["spread_cents"], 2.0)
         self.assertAlmostEqual(row["volume"], 125.0)
         self.assertIn("in_play", row)
-        self.client.list_tennis_markets.assert_called()
+        self.assertEqual(row["asset_class"], "tennis")
+        self.client.list_markets.assert_called()
 
     def test_fills_and_pnl_use_locked_schema(self):
         FillJournal(self.cfg.fill_log_csv, self.cfg.fill_log_jsonl).append(_fill())
@@ -192,7 +194,7 @@ class DashboardApiTests(unittest.TestCase):
         state = new_state(self.cfg, day="2026-09-06")
         state.ema["KXATPMATCH-26SEP06AAA-BBB"] = 0.60
         save_state(self.cfg, state)
-        self.client.list_tennis_markets.return_value = (
+        self.client.list_markets.return_value = (
             [
                 MarketSnapshot(
                     ticker="KXATPMATCH-26SEP06AAA-BBB",
@@ -311,6 +313,8 @@ class DashboardApiTests(unittest.TestCase):
         self.assertAlmostEqual(body["session"]["max_dollars_per_ticker"], 4.0)
         self.assertFalse(body["session"]["can_size_up"])
         self.assertTrue(body["session"]["live_matches_only"])
+        self.assertTrue(body["session"]["trade_bitcoin"])
+        self.assertTrue(body["session"]["trade_tennis"])
         self.assertTrue(body["run"]["continuous"])
         self.assertTrue(body["run"]["running"])
 
@@ -347,6 +351,14 @@ class DashboardApiTests(unittest.TestCase):
         self.assertAlmostEqual(status["starting_cash"], 80.0)
         self.assertAlmostEqual(status["max_dollars_per_ticker"], 4.0)
         self.assertFalse(status["can_size_up"])
+        self.assertTrue(status["trade_bitcoin"])
+        self.assertTrue(status["trade_tennis"])
+
+        empty = http.post(
+            "/api/start",
+            json={"starting_cash": 80, "trade_bitcoin": False, "trade_tennis": False},
+        )
+        self.assertEqual(empty.status_code, 400)
 
 
 if __name__ == "__main__":

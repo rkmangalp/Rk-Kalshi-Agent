@@ -1,11 +1,11 @@
 """Signal module — isolated from execution.
 
-Ingests live tennis snapshots, estimates a fair YES from last print + EMA,
-subtracts half-spread and a Kalshi-style quadratic fee, and emits buy/sell
-only when net edge clears the threshold.
+Ingests live Kalshi snapshots (tennis and/or Bitcoin), estimates a fair YES
+from last print + EMA, subtracts half-spread and a Kalshi-style quadratic
+fee, and emits buy YES and sell YES when net edge clears the threshold.
 
-This is a microstructure heuristic, not a match-winner model. REST polling
-cannot outrun the book; most scans should emit nothing.
+This is a microstructure heuristic, not a match-winner or BTC price model.
+REST polling cannot outrun the book; most scans should emit nothing.
 """
 
 from __future__ import annotations
@@ -96,7 +96,7 @@ class TennisSignalEngine:
             f"{side.upper()} YES {market.ticker}: fair {fair * 100:.2f}¢ vs mid {mid * 100:.2f}¢ "
             f"({last_note}, ema={ema * 100:.2f}¢); half-spread {half_spread * 100:.2f}¢ + "
             f"fee {fee_cents:.2f}¢; net edge {edge:.2f}¢ after costs "
-            f"(threshold {threshold:.2f}¢). Heuristic only — not a match pick."
+            f"(threshold {threshold:.2f}¢). {_thesis_caveat(market)}"
         )
         fee = quadratic_fee_dollars(
             mid,
@@ -121,6 +121,12 @@ class TennisSignalEngine:
             last_price=market.last_price,
             fair_yes=fair,
         )
+
+
+def _thesis_caveat(market: MarketSnapshot) -> str:
+    if market.asset_class == "bitcoin":
+        return "Heuristic only — not a bitcoin price forecast."
+    return "Heuristic only — not a match pick."
 
 
 def _is_stale(market: MarketSnapshot, now: float, stale_seconds: float) -> bool:

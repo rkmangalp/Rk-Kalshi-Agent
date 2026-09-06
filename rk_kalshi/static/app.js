@@ -28,6 +28,9 @@
     btnStop: $("btn-stop"),
     startHint: $("start-hint"),
     liveMatchesOnly: $("live-matches-only"),
+    tradeBitcoin: $("trade-bitcoin"),
+    tradeTennis: $("trade-tennis"),
+    filterBitcoinMarkets: $("filter-bitcoin-markets"),
     filterLiveMarkets: $("filter-live-markets"),
     log: $("log"),
     logCount: $("log-count"),
@@ -106,6 +109,8 @@
     els.dailyLoss.disabled = !enabled;
     els.startSleep.disabled = !enabled;
     if (els.liveMatchesOnly) els.liveMatchesOnly.disabled = !enabled;
+    if (els.tradeBitcoin) els.tradeBitcoin.disabled = !enabled;
+    if (els.tradeTennis) els.tradeTennis.disabled = !enabled;
     els.startPanel.classList.toggle("is-running", !enabled);
   }
 
@@ -123,23 +128,30 @@
   function renderMarkets(payload) {
     const all = payload.markets || [];
     const liveCount = all.filter((m) => m.in_play).length;
+    const btcCount = all.filter((m) => m.asset_class === "bitcoin").length;
     const liveOnly = Boolean(els.filterLiveMarkets && els.filterLiveMarkets.checked);
-    const rows = liveOnly ? all.filter((m) => m.in_play) : all;
+    const showBitcoin = !els.filterBitcoinMarkets || els.filterBitcoinMarkets.checked;
+    const rows = all.filter((m) => {
+      if (m.asset_class === "bitcoin") return showBitcoin;
+      if (liveOnly) return Boolean(m.in_play);
+      return true;
+    });
     els.marketsMeta.textContent =
-      `${liveCount} live / ${payload.count} open · ${payload.series.join(", ")} · ${fmt(payload.latency_ms, 1)} ms`;
+      `${btcCount} btc · ${liveCount} live tennis / ${payload.count} open · ${payload.series.join(", ")} · ${fmt(payload.latency_ms, 1)} ms`;
     if (!all.length) {
       els.marketsBody.innerHTML =
-        '<tr><td colspan="9" class="empty">No open tennis markets (off-season or empty series filter).</td></tr>';
+        '<tr><td colspan="10" class="empty">No open markets (empty series filter).</td></tr>';
       return;
     }
     if (!rows.length) {
       els.marketsBody.innerHTML =
-        '<tr><td colspan="9" class="empty">No live (in-play) tennis matches right now. Uncheck “Live only” to see upcoming books.</td></tr>';
+        '<tr><td colspan="10" class="empty">No rows for the current Bitcoin / live-tennis filters.</td></tr>';
       return;
     }
     els.marketsBody.innerHTML = rows.map((m) => `
       <tr>
         <td>${m.in_play ? '<span class="live-dot">LIVE</span>' : "—"}</td>
+        <td>${m.asset_class === "bitcoin" ? '<span class="btc-dot">BTC</span>' : escapeHtml(m.asset_class || "tennis")}</td>
         <td class="ticker">${escapeHtml(m.ticker)}</td>
         <td>${escapeHtml(m.event_name || "")}</td>
         <td class="num">${fmt(m.yes_bid, 3)}</td>
@@ -206,7 +218,7 @@
 
     const series = (status.series_tickers || []).join(", ");
     els.footer.textContent =
-      `localhost · paper_mode=true · live.enabled=false · live_matches_only=${status.live_matches_only} · series ${series} · edge ${status.edge_threshold_cents}¢`;
+      `localhost · paper_mode=true · live.enabled=false · btc=${status.trade_bitcoin} tennis=${status.trade_tennis} · live_matches_only=${status.live_matches_only} · series ${series} · edge ${status.edge_threshold_cents}¢`;
     if (!els.startForm.dataset.seeded) {
       if (status.starting_cash != null) els.startingCash.value = status.starting_cash;
       if (status.max_dollars_per_ticker != null) els.maxPerTrade.value = status.max_dollars_per_ticker;
@@ -218,13 +230,22 @@
       if (els.liveMatchesOnly && status.live_matches_only != null) {
         els.liveMatchesOnly.checked = Boolean(status.live_matches_only);
       }
+      if (els.tradeBitcoin && status.trade_bitcoin != null) {
+        els.tradeBitcoin.checked = Boolean(status.trade_bitcoin);
+      }
+      if (els.tradeTennis && status.trade_tennis != null) {
+        els.tradeTennis.checked = Boolean(status.trade_tennis);
+      }
       els.startForm.dataset.seeded = "1";
       els.sleep.dataset.seeded = "1";
     }
-    const liveNote = status.live_matches_only ? "live matches only" : "all open matches";
+    const books = [
+      status.trade_bitcoin ? "Bitcoin buy+sell" : null,
+      status.trade_tennis ? (status.live_matches_only ? "live tennis" : "all tennis") : null,
+    ].filter(Boolean).join(" · ") || "no books selected";
     els.startHint.textContent = running
-      ? `Paper session running (${liveNote}) — Stop ends polling. Live orders stay disabled.`
-      : `Paper bankroll $${fmt(status.starting_cash, 0)} · max $${fmt(status.max_dollars_per_ticker, 0)}/trade · daily loss $${fmt(status.daily_loss_limit, 0)} · ${liveNote}`;
+      ? `Paper session running (${books}) — Stop ends polling. Live orders stay disabled.`
+      : `Paper bankroll $${fmt(status.starting_cash, 0)} · max $${fmt(status.max_dollars_per_ticker, 0)}/trade · daily loss $${fmt(status.daily_loss_limit, 0)} · ${books}`;
   }
 
   function renderRun(run) {
@@ -272,7 +293,7 @@
       renderMarkets(payload);
     } catch (err) {
       els.marketsBody.innerHTML =
-        `<tr><td colspan="9" class="empty error">${escapeHtml(err.message)}</td></tr>`;
+        `<tr><td colspan="10" class="empty error">${escapeHtml(err.message)}</td></tr>`;
       els.marketsMeta.textContent = "Kalshi request failed";
     }
   }
@@ -314,6 +335,8 @@
           sleep_s: Number.isFinite(sleep) ? sleep : 15,
           continuous: true,
           live_matches_only: Boolean(els.liveMatchesOnly && els.liveMatchesOnly.checked),
+          trade_bitcoin: Boolean(!els.tradeBitcoin || els.tradeBitcoin.checked),
+          trade_tennis: Boolean(!els.tradeTennis || els.tradeTennis.checked),
           mode: "paper",
         }),
       });
@@ -346,6 +369,11 @@
   els.btnMarkets.addEventListener("click", () => { refreshMarkets(); });
   if (els.filterLiveMarkets) {
     els.filterLiveMarkets.addEventListener("change", () => {
+      if (lastMarkets) renderMarkets(lastMarkets);
+    });
+  }
+  if (els.filterBitcoinMarkets) {
+    els.filterBitcoinMarkets.addEventListener("change", () => {
       if (lastMarkets) renderMarkets(lastMarkets);
     });
   }

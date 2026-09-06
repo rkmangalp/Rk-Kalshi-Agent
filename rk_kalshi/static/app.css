@@ -145,15 +145,21 @@ h1 {
 
 .start-form .fine { grid-column: 1 / -1; }
 .live-toggle { grid-column: 1 / -1; }
-.live-dot {
+.live-dot, .btc-dot {
   display: inline-block;
   padding: 0.1rem 0.4rem;
   border-radius: 999px;
-  background: #5a2c28;
-  color: #ffb3ab;
   font-size: 0.68rem;
   font-weight: 800;
   letter-spacing: 0.06em;
+}
+.live-dot {
+  background: #5a2c28;
+  color: #ffb3ab;
+}
+.btc-dot {
+  background: #3a3420;
+  color: var(--amber);
 }
 
 .summary {

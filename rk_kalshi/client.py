@@ -63,9 +63,15 @@ class KalshiPublicClient:
                 break
 
     def list_tennis_markets(self) -> tuple[list[MarketSnapshot], float]:
+        return self.list_markets(self.cfg.series_tickers)
+
+    def list_markets(
+        self,
+        series_tickers: tuple[str, ...] | None = None,
+    ) -> tuple[list[MarketSnapshot], float]:
         snapshots: list[MarketSnapshot] = []
         max_latency = 0.0
-        for series in self.cfg.series_tickers:
+        for series in series_tickers or self.cfg.enabled_series_tickers():
             cursor = None
             while True:
                 params: dict[str, Any] = {

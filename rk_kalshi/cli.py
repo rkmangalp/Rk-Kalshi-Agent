@@ -79,8 +79,8 @@ def _cmd_list(cfg) -> int:
     with KalshiPublicClient(cfg) as client:
         markets, latency_ms = client.list_tennis_markets()
     print(
-        f"open tennis markets: {len(markets)}  "
-        f"series={','.join(cfg.series_tickers)}  "
+        f"open markets: {len(markets)}  "
+        f"series={','.join(cfg.enabled_series_tickers())}  "
         f"latency_ms={latency_ms:.1f}"
     )
     if not markets:
