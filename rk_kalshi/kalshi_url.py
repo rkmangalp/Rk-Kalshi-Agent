@@ -197,10 +197,18 @@ def _event_from_market(ticker: str) -> str | None:
 EXAMPLE_CRYPTO_URLS = (
     "https://kalshi.com/markets/kxbtc15m/bitcoin-price-up-down/kxbtc15m-26sep061845",
 )
-EXAMPLE_CONTRACT_URLS = EXAMPLE_URLS + EXAMPLE_CRYPTO_URLS
+EXAMPLE_CHALLENGER_URL = (
+    "https://kalshi.com/markets/kxatpchallengermatch/challenger-atp-/"
+    "kxatpchallengermatch-26sep06kimtam"
+)
+EXAMPLE_CONTRACT_URLS = (
+    EXAMPLE_URLS[0],
+    EXAMPLE_CHALLENGER_URL,
+    EXAMPLE_CRYPTO_URLS[0],
+)
 _HELP_MULTI = (
-    "Paste a Kalshi tennis match or Bitcoin page, for example "
-    + EXAMPLE_URLS[0]
+    "Paste any Kalshi market or event URL, for example "
+    + EXAMPLE_CHALLENGER_URL
     + " or "
     + EXAMPLE_CRYPTO_URLS[0]
     + "."
@@ -232,36 +240,134 @@ class ParsedContract:
 
 
 def parse_contract(text: str) -> ParsedContract:
-    """Parse a tennis or Bitcoin/ETH Kalshi URL or ticker."""
+    """Parse any Kalshi event/market URL or KX ticker — no series whitelist."""
     raw = (text or "").strip()
     if not raw:
-        raise KalshiUrlError("Paste a Kalshi tennis or Bitcoin URL or ticker. " + _HELP_MULTI)
+        raise KalshiUrlError("Paste any Kalshi market or event URL. " + _HELP_MULTI)
 
-    tennis_error: KalshiTennisUrlError | None = None
-    try:
-        tennis = parse_tennis_contract(raw)
-        return ParsedContract(
-            series_ticker=tennis.series_ticker,
-            event_ticker=tennis.event_ticker,
-            market_ticker=tennis.market_ticker,
-            match_id=tennis.match_id,
-            source=tennis.source,
-            raw=tennis.raw,
-            asset_class="tennis",
+    if "://" in raw or raw.lower().startswith(("kalshi.com/", "www.kalshi.com/")):
+        series, event, market = _generic_from_url(raw)
+        source = "url"
+    else:
+        series, event, market = _generic_from_ticker(raw)
+        source = "ticker"
+
+    if not event:
+        raise KalshiUrlError("That is not a recognizable Kalshi event or market. " + _HELP_MULTI)
+    return ParsedContract(
+        series_ticker=series,
+        event_ticker=event,
+        market_ticker=market,
+        match_id=event,
+        source=source,
+        raw=raw,
+        asset_class=_asset_class_for_series(series),
+    )
+
+
+def _asset_class_for_series(series: str) -> str:
+    prefix = (series or "").upper().split("-", 1)[0]
+    if prefix.startswith("KXBTC") or prefix.startswith("KXETH"):
+        return "bitcoin"
+    if prefix.startswith(("KXATP", "KXWTA", "KXITF")):
+        return "tennis"
+    return "other"
+
+
+def _generic_from_url(raw: str) -> tuple[str, str, str | None]:
+    url = raw if "://" in raw else "https://" + raw
+    parsed = urlparse(url)
+    host = (parsed.hostname or "").lower()
+    if host.startswith("www."):
+        host = host[4:]
+    if host not in _KALSHI_HOSTS and not host.endswith(".kalshi.com"):
+        raise KalshiUrlError("That is not a Kalshi link. " + _HELP_MULTI)
+
+    pieces: list[str] = []
+    for part in parsed.path.split("/"):
+        if part:
+            pieces.append(unquote(part))
+    for key, values in parse_qs(parsed.query).items():
+        if key.lower() in {"ticker", "event_ticker", "market", "market_ticker"}:
+            pieces.extend(values)
+
+    tokens = [tok for piece in pieces if (tok := _normalize_kx_token(piece))]
+    market = next((tok for tok in reversed(tokens) if _kx_kind(tok) == "market"), None)
+    event = _event_from_kx(market) if market else None
+    if event is None:
+        event = next((tok for tok in reversed(tokens) if _kx_kind(tok) == "event"), None)
+    if event:
+        series = event.split("-", 1)[0]
+        return series, event, market
+
+    if any(_kx_kind(tok) == "series" for tok in tokens) or any(
+        _normalize_kx_token(part) and _kx_kind(_normalize_kx_token(part) or "") == "series"
+        for part in pieces
+    ):
+        raise KalshiUrlError(
+            "That Kalshi link is a series page, not a specific event or market. " + _HELP_MULTI
         )
-    except KalshiTennisUrlError as exc:
-        tennis_error = exc
+    raise KalshiUrlError("That is not a recognizable Kalshi event or market. " + _HELP_MULTI)
 
-    try:
-        return parse_crypto_contract(raw)
-    except KalshiUrlError as crypto_error:
-        if tennis_error is not None and _looks_like_crypto_text(raw):
-            raise crypto_error from tennis_error
-        if tennis_error is not None and "not a Kalshi link" in str(tennis_error):
-            raise KalshiUrlError("That is not a Kalshi link. " + _HELP_MULTI) from tennis_error
-        if tennis_error is not None:
-            raise tennis_error
-        raise crypto_error
+
+def _generic_from_ticker(raw: str) -> tuple[str, str, str | None]:
+    ticker = _normalize_kx_token(raw)
+    if not ticker:
+        raise KalshiUrlError("That is not a recognizable Kalshi event or market. " + _HELP_MULTI)
+    kind = _kx_kind(ticker)
+    if kind == "series":
+        raise KalshiUrlError(
+            "That Kalshi ticker is a series, not a specific event or market. " + _HELP_MULTI
+        )
+    if kind == "market":
+        event = _event_from_kx(ticker)
+        if not event:
+            raise KalshiUrlError("That is not a recognizable Kalshi event or market. " + _HELP_MULTI)
+        return event.split("-", 1)[0], event, ticker
+    if kind == "event":
+        return ticker.split("-", 1)[0], ticker, None
+    raise KalshiUrlError("That is not a recognizable Kalshi event or market. " + _HELP_MULTI)
+
+
+def _normalize_kx_token(value: str) -> str | None:
+    text = (value or "").strip().strip("/")
+    if not text:
+        return None
+    text = text.split("?", 1)[0].split("#", 1)[0].upper()
+    if _kx_kind(text):
+        return text
+    return None
+
+
+def _kx_kind(ticker: str) -> str | None:
+    """Return 'series', 'event', or 'market' for a KX… token."""
+    if not ticker.startswith("KX") or len(ticker) < 4:
+        return None
+    parts = ticker.split("-")
+    series = parts[0]
+    if not series[2:].isalnum():
+        return None
+    if len(parts) == 1:
+        return "series"
+    code = parts[1]
+    if len(code) < 4 or not all(ch.isalnum() or ch == "." for ch in code):
+        return None
+    if len(parts) == 2:
+        return "event"
+    suffix = "-".join(parts[2:])
+    if not suffix or not all(ch.isalnum() or ch in {".", "_"} for ch in suffix):
+        return None
+    return "market"
+
+
+def _event_from_kx(ticker: str | None) -> str | None:
+    if not ticker:
+        return None
+    parts = ticker.split("-")
+    if len(parts) < 2:
+        return None
+    event = "-".join(parts[:2])
+    return event if _kx_kind(event) == "event" else None
 
 
 def parse_crypto_contract(text: str) -> ParsedContract:

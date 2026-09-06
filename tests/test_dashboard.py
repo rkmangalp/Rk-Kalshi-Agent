@@ -129,6 +129,8 @@ class DashboardApiTests(unittest.TestCase):
         self.assertIn("contract-status", response.text)
         self.assertIn("kalshi.com/markets/kxatpmatch", response.text)
         self.assertIn("kxbtc15m/bitcoin-price-up-down", response.text)
+        self.assertIn("kxatpchallengermatch", response.text)
+        self.assertIn("Paste any Kalshi market or event URL", response.text)
         self.assertIn("Contract / match", response.text)
         self.assertIn("not a live Kalshi account", response.text)
 
@@ -451,6 +453,22 @@ class DashboardApiTests(unittest.TestCase):
         self.assertEqual(crypto.json()["target"]["event_ticker"], "KXBTC15M-26SEP061845")
         self.assertEqual(crypto.json()["target"]["asset_class"], "bitcoin")
         self.assertEqual(crypto.json()["target"]["error"], "")
+
+        challenger = self.http.post(
+            "/api/contract",
+            json={
+                "url": (
+                    "https://kalshi.com/markets/kxatpchallengermatch/challenger-atp-/"
+                    "kxatpchallengermatch-26sep06kimtam"
+                )
+            },
+        )
+        self.assertEqual(challenger.status_code, 200)
+        self.assertEqual(
+            challenger.json()["target"]["event_ticker"],
+            "KXATPCHALLENGERMATCH-26SEP06KIMTAM",
+        )
+        self.assertEqual(challenger.json()["target"]["asset_class"], "tennis")
 
         ok = self.http.post(
             "/api/contract",

@@ -65,6 +65,43 @@ class KalshiPublicClient:
     def list_tennis_markets(self) -> tuple[list[MarketSnapshot], float]:
         return self.list_markets(self.cfg.series_tickers)
 
+    def list_event_markets(self, event_ticker: str) -> tuple[list[MarketSnapshot], float]:
+        """Fetch one event’s markets by ticker, any series."""
+        ticker = (event_ticker or "").strip()
+        if not ticker:
+            return [], 0.0
+        try:
+            payload, latency_ms = self.get_json(
+                f"/events/{ticker}",
+                params={"with_nested_markets": True},
+            )
+        except httpx.HTTPStatusError:
+            payload, latency_ms = self.get_json(
+                "/markets",
+                params={
+                    "event_ticker": ticker,
+                    "status": "open",
+                    "limit": self.cfg.page_limit,
+                },
+            )
+            markets = payload.get("markets") or []
+            event = {
+                "event_ticker": ticker,
+                "series_ticker": ticker.split("-", 1)[0],
+                "title": ticker,
+                "markets": markets,
+            }
+            return _snapshots_from_event(event, event["series_ticker"]), latency_ms
+
+        event = payload.get("event")
+        if not isinstance(event, dict):
+            events = payload.get("events") or []
+            event = events[0] if events else payload
+        if not isinstance(event, dict):
+            return [], latency_ms
+        series = str(event.get("series_ticker") or ticker.split("-", 1)[0])
+        return _snapshots_from_event(event, series), latency_ms
+
     def list_markets(
         self,
         series_tickers: tuple[str, ...] | None = None,

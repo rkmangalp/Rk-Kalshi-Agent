@@ -252,6 +252,42 @@ class RunnerTests(unittest.TestCase):
         self.assertEqual(fills[0].ticker, wanted.ticker)
         self.assertEqual(runner.last_scan["targeted"], 1)
 
+    def test_run_once_fetches_targeted_challenger_event_from_api(self):
+        from dataclasses import replace
+
+        challenger = MarketSnapshot(
+            ticker="KXATPCHALLENGERMATCH-26SEP06KIMTAM-KIM",
+            event_ticker="KXATPCHALLENGERMATCH-26SEP06KIMTAM",
+            event_name="Kim vs Tamm",
+            title="Dong Ju Kim wins",
+            yes_bid=0.395,
+            yes_ask=0.405,
+            last_price=0.40,
+            volume=50.0,
+            updated_ts=time.time(),
+            status="active",
+            series_ticker="KXATPCHALLENGERMATCH",
+            occurrence_ts=time.time(),
+        )
+        cfg = replace(
+            self.cfg,
+            target_event_ticker="KXATPCHALLENGERMATCH-26SEP06KIMTAM",
+            target_asset_class="tennis",
+            trade_tennis=False,
+            trade_bitcoin=False,
+        )
+        seeded = new_state(cfg, day="2026-09-06")
+        seeded.ema[challenger.ticker] = 0.60
+        save_state(cfg, seeded)
+        client = MagicMock()
+        client.list_event_markets.return_value = ([challenger], 12.0)
+        client.list_markets.return_value = ([], 9.0)
+        runner = PaperRunner(cfg, client=client)
+        fills = runner.run_once()
+        self.assertEqual(len(fills), 1)
+        self.assertEqual(fills[0].ticker, challenger.ticker)
+        client.list_event_markets.assert_called_with("KXATPCHALLENGERMATCH-26SEP06KIMTAM")
+
     def test_select_targeted_tennis_filters_event_and_market(self):
         from rk_kalshi.models import select_targeted_tennis
 

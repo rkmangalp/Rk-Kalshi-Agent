@@ -295,7 +295,7 @@
     const books = [
       status.trade_bitcoin ? "Bitcoin buy+sell" : null,
       lastTarget.active
-        ? `${lastTarget.asset_class === "bitcoin" ? "btc" : "tennis"} ${lastTarget.label || lastTarget.event_ticker}`
+        ? `${lastTarget.asset_class || "kalshi"} ${lastTarget.label || lastTarget.event_ticker}`
         : (status.trade_tennis ? (status.live_matches_only ? "live tennis" : "all tennis") : null),
     ].filter(Boolean).join(" · ") || "no books selected";
     els.startHint.textContent = running
@@ -347,13 +347,13 @@
     if (!lastTarget.active) {
       els.contractStatus.textContent = "No contract selected — paper can scan the full enabled universe.";
     } else if (lastTarget.market_ticker) {
-      const kind = lastTarget.asset_class === "bitcoin" ? "Bitcoin" : "tennis";
+      const kind = lastTarget.asset_class || "Kalshi";
       els.contractStatus.textContent =
         `Selected ${kind} contract ${lastTarget.market_ticker} on ${lastTarget.event_ticker}. Paper trading will use only this market.`;
     } else {
-      const kind = lastTarget.asset_class === "bitcoin" ? "Bitcoin event" : "tennis match";
+      const kind = lastTarget.asset_class || "Kalshi";
       els.contractStatus.textContent =
-        `Selected ${kind} ${lastTarget.label || lastTarget.event_ticker}. Paper trading will use only this event’s contracts.`;
+        `Selected ${kind} event ${lastTarget.label || lastTarget.event_ticker}. Paper trading will use only this event’s contracts.`;
     }
   }
 

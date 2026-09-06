@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta http-equiv="Cache-Control" content="no-store">
   <title>Rk Kalshi Paper Desk</title>
-  <link rel="stylesheet" href="/static/app.css?v=contract3">
+  <link rel="stylesheet" href="/static/app.css?v=contract4">
 </head>
 <body>
   <div class="banner" role="status">
@@ -30,8 +30,8 @@
       <p class="lede">
         Set a paper bankroll, then Start. Paper-trades Kalshi
         <strong>Bitcoin buy and sell</strong> (YES contracts) and optional
-        live tennis. Optionally lock to <strong>one pasted Kalshi
-        contract / match</strong>. This is simulated cash — the UI cannot
+        live tennis. Optionally lock to <strong>any pasted Kalshi
+        market or event</strong>. This is simulated cash — the UI cannot
         place live Kalshi or exchange orders. <code>can_size_up</code>
         stays locked. Stop ends polling. <strong>Clear</strong> wipes
         the local paper session (fills, P&amp;L, log, selected contract) —
@@ -72,8 +72,9 @@
         <h3>Choose a contract to paper-trade</h3>
         <p class="fine">
           If a contract is set, paper trading uses <strong>only that
-          event’s markets</strong> — not every open book. Paste a
-          Kalshi tennis or Bitcoin URL, or pick a listed event.
+          event’s markets</strong> — not every open book. Paste
+          <strong>any Kalshi market or event URL</strong>, or pick a
+          listed event.
         </p>
         <label>
           Open contracts
@@ -82,8 +83,8 @@
           </select>
         </label>
         <label class="contract-url">
-          Paste Kalshi tennis or Bitcoin URL or ticker
-          <input id="contract-url" type="text" spellcheck="false" placeholder="https://kalshi.com/markets/kxbtc15m/bitcoin-price-up-down/kxbtc15m-26sep061845">
+          Paste any Kalshi market or event URL
+          <input id="contract-url" type="text" spellcheck="false" placeholder="https://kalshi.com/markets/kxatpchallengermatch/challenger-atp-/kxatpchallengermatch-26sep06kimtam">
         </label>
         <div class="contract-actions">
           <button type="button" id="btn-use-contract">Use this contract</button>
@@ -94,8 +95,9 @@
           Examples:
           <code>https://kalshi.com/markets/kxatpmatch/atp-tennis-match/kxatpmatch-26sep06cerblo</code>
           ·
+          <code>https://kalshi.com/markets/kxatpchallengermatch/challenger-atp-/kxatpchallengermatch-26sep06kimtam</code>
+          ·
           <code>https://kalshi.com/markets/kxbtc15m/bitcoin-price-up-down/kxbtc15m-26sep061845</code>
-          · ticker <code>KXATPMATCH-26SEP06CERBLO</code>
         </p>
       </div>
       <div class="start-actions">
@@ -247,6 +249,6 @@
     <span id="footer-meta">localhost · paper_mode=true · live.enabled cannot be turned on from this UI</span>
   </footer>
 
-  <script src="/static/app.js?v=contract3"></script>
+  <script src="/static/app.js?v=contract4"></script>
 </body>
 </html>

@@ -54,46 +54,78 @@ class PaperRunner:
     def run_once(self) -> list[Fill]:
         state = load_state(self.cfg)
         self.signal.load_ema(state.ema)
-        markets, latency_ms = self.client.list_markets()
         now = time.time()
-        tennis = [m for m in markets if m.asset_class == "tennis"]
-        bitcoin = select_bitcoin_tradeable(
-            markets,
-            near_money_low=self.cfg.bitcoin_near_money_low,
-            near_money_high=self.cfg.bitcoin_near_money_high,
-        )
-        live, nxt = select_in_play(
-            tennis,
-            now,
-            pre_start_s=max(0.0, self.cfg.live_pre_start_minutes) * 60.0,
-            max_duration_s=max(0.1, self.cfg.live_max_hours) * 3600.0,
-        )
-        self.last_scan = {
-            "open": len(markets),
-            "live": len(live),
-            "bitcoin": len(bitcoin),
-            "next_event_name": nxt.event_name if nxt else "",
-            "next_start_iso": (
-                time.strftime("%Y-%m-%dT%H:%M:%S%z", time.localtime(nxt.occurrence_ts))
-                if nxt and nxt.occurrence_ts
-                else ""
-            ),
-        }
-        targeted: list[MarketSnapshot] = []
         has_target = bool(self.cfg.target_event_ticker or self.cfg.target_market_ticker)
-        pool: list[MarketSnapshot] = []
-        if self.cfg.trade_tennis:
-            pool.extend(tennis if has_target else (live if self.cfg.live_matches_only else tennis))
-        if self.cfg.trade_bitcoin:
-            pool.extend(bitcoin)
+        targeted: list[MarketSnapshot] = []
+        markets: list[MarketSnapshot] = []
+        latency_ms = 0.0
         if has_target:
+            fetched = getattr(self.client, "list_event_markets", None)
+            if callable(fetched):
+                try:
+                    raw_targeted, latency_ms = fetched(self.cfg.target_event_ticker)
+                except (TypeError, ValueError):
+                    raw_targeted, latency_ms = [], 0.0
+                if isinstance(raw_targeted, list):
+                    targeted = raw_targeted
+            if not targeted:
+                markets, latency_ms = self.client.list_markets()
+                targeted = markets
             targeted = select_targeted_markets(
-                pool,
+                targeted,
                 event_ticker=self.cfg.target_event_ticker,
                 market_ticker=self.cfg.target_market_ticker,
             )
             tradeable = targeted
+            tennis = [m for m in targeted if m.asset_class == "tennis"]
+            bitcoin = [m for m in targeted if m.asset_class == "bitcoin"]
+            live, nxt = select_in_play(
+                tennis,
+                now,
+                pre_start_s=max(0.0, self.cfg.live_pre_start_minutes) * 60.0,
+                max_duration_s=max(0.1, self.cfg.live_max_hours) * 3600.0,
+            )
+            self.last_scan = {
+                "open": len(targeted),
+                "live": len(live),
+                "bitcoin": len(bitcoin),
+                "next_event_name": nxt.event_name if nxt else "",
+                "next_start_iso": (
+                    time.strftime("%Y-%m-%dT%H:%M:%S%z", time.localtime(nxt.occurrence_ts))
+                    if nxt and nxt.occurrence_ts
+                    else ""
+                ),
+            }
         else:
+            markets, latency_ms = self.client.list_markets()
+            tennis = [m for m in markets if m.asset_class == "tennis"]
+            bitcoin = select_bitcoin_tradeable(
+                markets,
+                near_money_low=self.cfg.bitcoin_near_money_low,
+                near_money_high=self.cfg.bitcoin_near_money_high,
+            )
+            live, nxt = select_in_play(
+                tennis,
+                now,
+                pre_start_s=max(0.0, self.cfg.live_pre_start_minutes) * 60.0,
+                max_duration_s=max(0.1, self.cfg.live_max_hours) * 3600.0,
+            )
+            self.last_scan = {
+                "open": len(markets),
+                "live": len(live),
+                "bitcoin": len(bitcoin),
+                "next_event_name": nxt.event_name if nxt else "",
+                "next_start_iso": (
+                    time.strftime("%Y-%m-%dT%H:%M:%S%z", time.localtime(nxt.occurrence_ts))
+                    if nxt and nxt.occurrence_ts
+                    else ""
+                ),
+            }
+            pool: list[MarketSnapshot] = []
+            if self.cfg.trade_tennis:
+                pool.extend(live if self.cfg.live_matches_only else tennis)
+            if self.cfg.trade_bitcoin:
+                pool.extend(bitcoin)
             tradeable = pool
         self.last_scan["targeted"] = len(targeted)
         self.last_scan["target_event_ticker"] = self.cfg.target_event_ticker

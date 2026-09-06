@@ -427,7 +427,6 @@ class DashboardService:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         self.last_contract_error = ""
         label = parsed.event_ticker
-        is_crypto = parsed.asset_class == "bitcoin"
         cfg = replace(
             self.cfg,
             target_url=parsed.raw if parsed.source == "url" else "",
@@ -435,8 +434,8 @@ class DashboardService:
             target_market_ticker=parsed.market_ticker or "",
             target_label=label,
             target_asset_class=parsed.asset_class,
-            trade_tennis=True if not is_crypto else self.cfg.trade_tennis,
-            trade_bitcoin=True if is_crypto else self.cfg.trade_bitcoin,
+            trade_tennis=True if parsed.asset_class == "tennis" else self.cfg.trade_tennis,
+            trade_bitcoin=True if parsed.asset_class == "bitcoin" else self.cfg.trade_bitcoin,
             live_enabled=False,
         )
         self.bind_config(cfg)
@@ -759,6 +758,23 @@ def create_app(
     def markets() -> dict[str, Any]:
         try:
             snapshots, latency_ms = service.client.list_markets()
+            target_event = service.cfg.target_event_ticker
+            fetch_event = getattr(service.client, "list_event_markets", None)
+            if target_event and callable(fetch_event):
+                fetched = fetch_event(target_event)
+                if (
+                    isinstance(fetched, tuple)
+                    and len(fetched) == 2
+                    and isinstance(fetched[0], list)
+                ):
+                    extra, extra_ms = fetched
+                    try:
+                        latency_ms = max(float(latency_ms), float(extra_ms or 0.0))
+                    except (TypeError, ValueError):
+                        pass
+                    if extra:
+                        seen = {m.ticker for m in snapshots}
+                        snapshots = list(snapshots) + [m for m in extra if m.ticker not in seen]
         except Exception as exc:  # noqa: BLE001 — HTTP client / parse errors
             raise HTTPException(status_code=502, detail=f"Kalshi public API error: {exc}") from exc
         tennis = [m for m in snapshots if m.asset_class != "bitcoin"]
@@ -767,7 +783,8 @@ def create_app(
             near_money_low=service.cfg.bitcoin_near_money_low,
             near_money_high=service.cfg.bitcoin_near_money_high,
         )
-        payload = [_market_payload(m) for m in tennis + bitcoin]
+        others = [m for m in snapshots if m.asset_class not in {"tennis", "bitcoin"}]
+        payload = [_market_payload(m) for m in tennis + bitcoin + others]
         payload.sort(key=lambda row: (0 if row["asset_class"] == "bitcoin" else 1, row["event_name"], row["ticker"]))
         return {
             "count": len(payload),
