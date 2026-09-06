@@ -79,20 +79,24 @@ Optional: `python3 -m pip install -e .` then `rk-kalshi list-tennis-markets`.
 
 The dashboard is a local FastAPI app: a **Start** page sets paper bankroll
 (default $100), max $ per trade, and daily loss, then polls until **Stop**.
-You can lock tennis to **one Kalshi match** by pasting a public tennis URL
-or picking an open event. When a match is set, paper tennis uses only that
-match’s contracts — not the full ATP/WTA/ITF universe.
+You can lock paper trading to **one Kalshi contract / match** by pasting
+a public tennis or Bitcoin URL or picking an open event. When a contract
+is set, paper trading uses only that event’s markets — not the full
+tennis universe or every Bitcoin book.
 
-Example Kalshi tennis URLs:
+Example Kalshi URLs:
 
 ```
 https://kalshi.com/markets/kxatpmatch/atp-tennis-match/kxatpmatch-26sep06cerblo
 https://kalshi.com/markets/kxwtamatch/wta-tennis-match/kxwtamatch-26mar29vekgor
 https://kalshi.com/markets/kxitfwmatch/itf-womens-match/kxitfwmatch-26sep06kursid
+https://kalshi.com/markets/kxbtc15m/bitcoin-price-up-down/kxbtc15m-26sep061845
 ```
 
-A bare event ticker such as `KXATPMATCH-26SEP06CERBLO` also works. Series
-pages (`/markets/kxatpmatch`) and non-tennis Kalshi links are rejected.
+A bare event ticker such as `KXATPMATCH-26SEP06CERBLO` or
+`KXBTC15M-26SEP061845` also works. Series pages (`/markets/kxatpmatch`,
+`/markets/kxbtc15m`) and non-Kalshi links are rejected with a red error
+on the contract box.
 
 **Stop** ends polling and leaves the paper book on screen so you can read
 it. **Clear** (shown after Stop / while idle) archives then wipes the

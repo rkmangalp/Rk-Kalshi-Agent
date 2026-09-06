@@ -52,6 +52,7 @@ class AppConfig:
     target_event_ticker: str = ""
     target_market_ticker: str = ""
     target_label: str = ""
+    target_asset_class: str = ""
 
     def enabled_series_tickers(self) -> tuple[str, ...]:
         ordered: list[str] = []

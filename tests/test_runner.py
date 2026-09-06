@@ -204,6 +204,54 @@ class RunnerTests(unittest.TestCase):
         self.assertEqual(fills[0].ticker, wanted.ticker)
         self.assertEqual(runner.last_scan["targeted"], 1)
 
+    def test_run_once_targets_selected_bitcoin_event_only(self):
+        from dataclasses import replace
+
+        wanted = MarketSnapshot(
+            ticker="KXBTC15M-26SEP061845-00",
+            event_ticker="KXBTC15M-26SEP061845",
+            event_name="BTC 15 min",
+            title="BTC price up",
+            yes_bid=0.395,
+            yes_ask=0.405,
+            last_price=0.40,
+            volume=50.0,
+            updated_ts=time.time(),
+            status="active",
+            series_ticker="KXBTC15M",
+        )
+        other = MarketSnapshot(
+            ticker="KXBTC15M-26SEP061900-00",
+            event_ticker="KXBTC15M-26SEP061900",
+            event_name="BTC later",
+            title="BTC price up",
+            yes_bid=0.395,
+            yes_ask=0.405,
+            last_price=0.40,
+            volume=50.0,
+            updated_ts=time.time(),
+            status="active",
+            series_ticker="KXBTC15M",
+        )
+        cfg = replace(
+            self.cfg,
+            target_event_ticker="KXBTC15M-26SEP061845",
+            target_asset_class="bitcoin",
+            trade_bitcoin=True,
+            trade_tennis=True,
+        )
+        seeded = new_state(cfg, day="2026-09-06")
+        seeded.ema[wanted.ticker] = 0.60
+        seeded.ema[other.ticker] = 0.60
+        save_state(cfg, seeded)
+        client = MagicMock()
+        client.list_markets.return_value = ([wanted, other], 9.0)
+        runner = PaperRunner(cfg, client=client)
+        fills = runner.run_once()
+        self.assertEqual(len(fills), 1)
+        self.assertEqual(fills[0].ticker, wanted.ticker)
+        self.assertEqual(runner.last_scan["targeted"], 1)
+
     def test_select_targeted_tennis_filters_event_and_market(self):
         from rk_kalshi.models import select_targeted_tennis
 
