@@ -28,7 +28,7 @@ from rk_kalshi.models import MarketSnapshot
 from rk_kalshi.risk import RiskManager
 from rk_kalshi.runner import PaperRunner
 from rk_kalshi.schema import FILL_FIELDS
-from rk_kalshi.state import load_state, new_state, save_state, utc_now_iso
+from rk_kalshi.state import load_state, local_now_iso, new_state, save_state
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 DEFAULT_HOST = "127.0.0.1"
@@ -136,7 +136,7 @@ class RunController:
             self.cycles_total = 0 if continuous else cycles
             self.fills_this_run = 0
             self.last_error = None
-            self.started_at = utc_now_iso()
+            self.started_at = local_now_iso()
             self.finished_at = None
             self.logs.clear()
             self._stop.clear()
@@ -159,7 +159,7 @@ class RunController:
         return self.snapshot()
 
     def _log(self, message: str) -> None:
-        line = f"{utc_now_iso()}  {message}"
+        line = f"{local_now_iso()}  {message}"
         with self._lock:
             self.logs.append(line)
 
@@ -228,7 +228,7 @@ class RunController:
             with self._lock:
                 self.running = False
                 self.stopping = False
-                self.finished_at = utc_now_iso()
+                self.finished_at = local_now_iso()
 
 
 class DashboardService:

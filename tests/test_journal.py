@@ -2,6 +2,7 @@ import csv
 import json
 import tempfile
 import unittest
+from datetime import datetime
 from pathlib import Path
 
 from rk_kalshi.config import AppConfig
@@ -10,7 +11,7 @@ from rk_kalshi.journal import FillJournal, read_fills, summarize_pnl
 from rk_kalshi.models import Signal
 from rk_kalshi.risk import RiskManager
 from rk_kalshi.schema import AUDIT_CORE_FIELDS, FILL_FIELDS, REQUIRED_FIELDS
-from rk_kalshi.state import new_state
+from rk_kalshi.state import local_now_iso, new_state
 
 
 def _signal() -> Signal:
@@ -103,6 +104,12 @@ class FillJournalTests(unittest.TestCase):
         self.assertEqual(summary["fills"], 1)
         self.assertFalse(summary["can_size_up"])
         self.assertIn("KXWTAMATCH-26SEP06AAA-BBB", summary["by_ticker"])
+        parsed = datetime.fromisoformat(fill.timestamp)
+        self.assertIsNotNone(parsed.tzinfo)
+
+    def test_local_now_iso_is_timezone_aware(self):
+        parsed = datetime.fromisoformat(local_now_iso())
+        self.assertIsNotNone(parsed.tzinfo)
 
 
 if __name__ == "__main__":

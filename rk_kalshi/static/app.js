@@ -58,6 +58,27 @@
     return data;
   }
 
+  function formatLocalDateTime(value) {
+    if (value == null || value === "") return "";
+    const text = String(value).trim();
+    const parsed = new Date(text);
+    if (Number.isNaN(parsed.getTime())) return text;
+    return parsed.toLocaleString(undefined, {
+      year: "numeric",
+      month: "short",
+      day: "numeric",
+      hour: "numeric",
+      minute: "2-digit",
+      second: "2-digit",
+    });
+  }
+
+  function formatLogLine(line) {
+    const match = String(line).match(/^(\S+)\s{2}([\s\S]*)$/);
+    if (!match) return line;
+    return `${formatLocalDateTime(match[1])}  ${match[2]}`;
+  }
+
   function fmt(value, digits = 4) {
     const num = Number(value);
     if (!Number.isFinite(num)) return "—";
@@ -90,7 +111,7 @@
       els.logCount.textContent = "0 lines";
       return;
     }
-    els.log.textContent = lines.join("\n");
+    els.log.textContent = lines.map(formatLogLine).join("\n");
     els.log.scrollTop = els.log.scrollHeight;
     els.logCount.textContent = `${lines.length} line${lines.length === 1 ? "" : "s"}`;
   }
@@ -128,7 +149,7 @@
     }
     els.fillsBody.innerHTML = rows.map((f) => `
       <tr>
-        <td class="ticker">${escapeHtml(f.timestamp || "")}</td>
+        <td class="ticker">${escapeHtml(formatLocalDateTime(f.timestamp))}</td>
         <td class="ticker">${escapeHtml(f.ticker || "")}</td>
         <td>${escapeHtml(f.side || "")}</td>
         <td class="num">${fmt(f.fill_price)}</td>
