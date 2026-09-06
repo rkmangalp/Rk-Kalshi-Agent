@@ -112,6 +112,9 @@ class DashboardApiTests(unittest.TestCase):
         self.assertIn("PAPER MODE ONLY", response.text)
         self.assertIn("no live orders", response.text)
         self.assertNotIn("Place live order", response.text)
+        self.assertIn("Start paper trading", response.text)
+        self.assertIn("starting-cash", response.text)
+        self.assertIn("btn-stop", response.text)
 
     def test_health_and_status_lock_paper_mode(self):
         health = self.http.get("/api/health")
@@ -130,6 +133,9 @@ class DashboardApiTests(unittest.TestCase):
         self.assertEqual(body["min_fills_before_size_up"], 200)
         self.assertFalse(body["killed"])
         self.assertEqual(body["banner"], "PAPER MODE ONLY — no live orders")
+        self.assertAlmostEqual(body["starting_cash"], 100.0)
+        self.assertAlmostEqual(body["max_dollars_per_ticker"], 5.0)
+        self.assertAlmostEqual(body["daily_loss_limit"], 15.0)
 
     def test_markets_reuses_client(self):
         response = self.http.get("/api/markets")
@@ -264,6 +270,77 @@ class DashboardApiTests(unittest.TestCase):
         with patch("rk_kalshi.cli._cmd_list", return_value=0) as listed:
             self.assertEqual(main(["list-tennis-markets"]), 0)
             listed.assert_called_once()
+
+    def test_start_applies_paper_bankroll_and_rejects_live(self):
+        from rk_kalshi.state import load_state
+
+        yaml_path = Path(self.tmp.name) / "config.yaml"
+        yaml_path.write_text(
+            "bankroll:\n  starting_cash: 100.0\n"
+            "risk:\n  max_dollars_per_ticker: 5.0\n  daily_loss_limit: 15.0\n"
+            "paper:\n  cycle_sleep_s: 15.0\n"
+            "live:\n  enabled: false\n"
+        )
+        app = create_app(self.cfg, client=self.client, config_path=yaml_path)
+        http = _client(app)
+
+        live = http.post("/api/start", json={"starting_cash": 80, "live": True})
+        self.assertEqual(live.status_code, 422)
+
+        started = http.post(
+            "/api/start",
+            json={
+                "starting_cash": 80,
+                "max_dollars_per_ticker": 4,
+                "daily_loss_limit": 12,
+                "sleep_s": 10,
+                "continuous": True,
+                "mode": "paper",
+            },
+        )
+        self.assertEqual(started.status_code, 200)
+        body = started.json()
+        self.assertTrue(body["paper_mode"])
+        self.assertFalse(body["live_enabled"])
+        self.assertAlmostEqual(body["session"]["starting_cash"], 80.0)
+        self.assertAlmostEqual(body["session"]["max_dollars_per_ticker"], 4.0)
+        self.assertFalse(body["session"]["can_size_up"])
+        self.assertTrue(body["run"]["continuous"])
+        self.assertTrue(body["run"]["running"])
+
+        busy = http.post("/api/start", json={"starting_cash": 80, "sleep_s": 10})
+        self.assertEqual(busy.status_code, 409)
+
+        stopped = http.post("/api/stop")
+        self.assertEqual(stopped.status_code, 200)
+        deadline = time.time() + 4
+        snapshot = None
+        while time.time() < deadline:
+            snapshot = http.get("/api/run").json()
+            if not snapshot["running"]:
+                break
+            time.sleep(0.05)
+        self.assertIsNotNone(snapshot)
+        self.assertFalse(snapshot["running"])
+        self.assertTrue(any("stop requested" in line for line in snapshot["logs"]))
+
+        state = load_state(app.state.service.cfg)
+        self.assertAlmostEqual(state.starting_cash, 80.0)
+        self.assertAlmostEqual(state.cash, 80.0)
+        self.assertFalse(app.state.service.cfg.live_enabled)
+        self.assertFalse(app.state.service.cfg.allow_size_up)
+
+        session_file = Path(self.tmp.name) / "dashboard_session.json"
+        self.assertTrue(session_file.exists())
+        session = session_file.read_text()
+        self.assertIn("80", session)
+        self.assertIn('"live_enabled": false', session)
+        self.assertIn("starting_cash: 80.0", yaml_path.read_text())
+
+        status = http.get("/api/status").json()
+        self.assertAlmostEqual(status["starting_cash"], 80.0)
+        self.assertAlmostEqual(status["max_dollars_per_ticker"], 4.0)
+        self.assertFalse(status["can_size_up"])
 
 
 if __name__ == "__main__":

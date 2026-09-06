@@ -18,6 +18,15 @@
     sleep: $("sleep"),
     btnOnce: $("btn-once"),
     btnCycles: $("btn-cycles"),
+    startPanel: $("start-panel"),
+    startForm: $("start-form"),
+    startingCash: $("starting-cash"),
+    maxPerTrade: $("max-per-trade"),
+    dailyLoss: $("daily-loss"),
+    startSleep: $("start-sleep"),
+    btnStart: $("btn-start"),
+    btnStop: $("btn-stop"),
+    startHint: $("start-hint"),
     log: $("log"),
     logCount: $("log-count"),
     marketsBody: $("markets-body"),
@@ -65,6 +74,14 @@
   function setRunEnabled(enabled) {
     els.btnOnce.disabled = !enabled;
     els.btnCycles.disabled = !enabled;
+    els.btnStart.disabled = !enabled;
+    els.btnStart.hidden = !enabled;
+    els.btnStop.hidden = enabled;
+    els.startingCash.disabled = !enabled;
+    els.maxPerTrade.disabled = !enabled;
+    els.dailyLoss.disabled = !enabled;
+    els.startSleep.disabled = !enabled;
+    els.startPanel.classList.toggle("is-running", !enabled);
   }
 
   function renderLog(lines) {
@@ -156,15 +173,28 @@
     const series = (status.series_tickers || []).join(", ");
     els.footer.textContent =
       `localhost · paper_mode=true · live.enabled=false · series ${series} · edge ${status.edge_threshold_cents}¢`;
-    if (!els.sleep.dataset.seeded && status.cycle_sleep_s != null) {
-      els.sleep.value = status.cycle_sleep_s;
+    if (!els.startForm.dataset.seeded) {
+      if (status.starting_cash != null) els.startingCash.value = status.starting_cash;
+      if (status.max_dollars_per_ticker != null) els.maxPerTrade.value = status.max_dollars_per_ticker;
+      if (status.daily_loss_limit != null) els.dailyLoss.value = status.daily_loss_limit;
+      if (status.cycle_sleep_s != null) {
+        els.startSleep.value = status.cycle_sleep_s;
+        els.sleep.value = status.cycle_sleep_s;
+      }
+      els.startForm.dataset.seeded = "1";
       els.sleep.dataset.seeded = "1";
     }
+    els.startHint.textContent = running
+      ? "Paper session running — Stop ends polling. Live orders stay disabled."
+      : `Paper bankroll $${fmt(status.starting_cash, 0)} · max $${fmt(status.max_dollars_per_ticker, 0)}/trade · daily loss $${fmt(status.daily_loss_limit, 0)}`;
   }
 
   function renderRun(run) {
     running = Boolean(run.running);
-    if (running) {
+    if (running && run.continuous) {
+      const suffix = run.stopping ? " · stopping" : "";
+      els.runState.textContent = `running cycle ${run.cycles_done}${suffix}`;
+    } else if (running) {
       els.runState.textContent = `running ${run.cycles_done}/${run.cycles_total}`;
     } else if (run.last_error) {
       els.runState.textContent = "error";
@@ -191,8 +221,8 @@
       fetchJSON("/api/pnl"),
       fetchJSON("/api/fills"),
     ]);
-    renderSummary(pnl, status);
     renderRun(status.run || {});
+    renderSummary(pnl, status);
     renderFills(fills);
   }
 
@@ -228,11 +258,51 @@
     }
   }
 
+  async function startSession() {
+    const startingCash = Number(els.startingCash.value);
+    const maxPerTrade = Number(els.maxPerTrade.value);
+    const dailyLoss = Number(els.dailyLoss.value);
+    const sleep = Number(els.startSleep.value);
+    setRunEnabled(false);
+    try {
+      const payload = await fetchJSON("/api/start", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          starting_cash: startingCash,
+          max_dollars_per_ticker: maxPerTrade,
+          daily_loss_limit: dailyLoss,
+          sleep_s: Number.isFinite(sleep) ? sleep : 15,
+          continuous: true,
+          mode: "paper",
+        }),
+      });
+      if (payload.run) renderRun(payload.run);
+    } catch (err) {
+      els.log.textContent = `error: ${err.message}`;
+      setRunEnabled(true);
+    }
+  }
+
+  async function stopSession() {
+    els.btnStop.disabled = true;
+    try {
+      const run = await fetchJSON("/api/stop", { method: "POST" });
+      renderRun(run);
+    } catch (err) {
+      els.log.textContent = `error: ${err.message}`;
+    } finally {
+      els.btnStop.disabled = false;
+    }
+  }
+
   els.btnOnce.addEventListener("click", () => startRun(1));
   els.btnCycles.addEventListener("click", () => {
     const cycles = Math.max(1, Number(els.cycles.value) || 1);
     startRun(cycles);
   });
+  els.btnStart.addEventListener("click", () => startSession());
+  els.btnStop.addEventListener("click", () => stopSession());
   els.btnMarkets.addEventListener("click", () => { refreshMarkets(); });
   els.autoMarkets.addEventListener("change", () => {
     if (marketsTimer) {

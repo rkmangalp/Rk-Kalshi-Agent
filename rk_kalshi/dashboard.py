@@ -5,11 +5,14 @@ Binds to localhost by default. Live order submission is never exposed.
 
 from __future__ import annotations
 
+import json
+import re
 import threading
 import time
 import webbrowser
 from collections import deque
 from contextlib import asynccontextmanager
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -25,7 +28,7 @@ from rk_kalshi.models import MarketSnapshot
 from rk_kalshi.risk import RiskManager
 from rk_kalshi.runner import PaperRunner
 from rk_kalshi.schema import FILL_FIELDS
-from rk_kalshi.state import load_state, utc_now_iso
+from rk_kalshi.state import load_state, new_state, save_state, utc_now_iso
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 DEFAULT_HOST = "127.0.0.1"
@@ -47,6 +50,13 @@ _NUMERIC_FILL_FIELDS = {
 _LOOPBACK = {"127.0.0.1", "localhost", "::1"}
 
 
+def _reject_live(live: bool | None, mode: str | None) -> None:
+    if live is True:
+        raise ValueError("live trading is disabled; paper mode only")
+    if mode is not None and str(mode).strip().lower() == "live":
+        raise ValueError("live trading is disabled; paper mode only")
+
+
 class RunRequest(BaseModel):
     cycles: int = Field(default=1, ge=1, le=MAX_CYCLES)
     sleep_s: float | None = Field(default=None, ge=0.0, le=MAX_SLEEP_S)
@@ -55,10 +65,23 @@ class RunRequest(BaseModel):
 
     @model_validator(mode="after")
     def reject_live(self) -> "RunRequest":
-        if self.live is True:
-            raise ValueError("live trading is disabled; paper mode only")
-        if self.mode is not None and str(self.mode).strip().lower() == "live":
-            raise ValueError("live trading is disabled; paper mode only")
+        _reject_live(self.live, self.mode)
+        return self
+
+
+class StartRequest(BaseModel):
+    starting_cash: float = Field(default=100.0, gt=0, le=100_000)
+    max_dollars_per_ticker: float = Field(default=5.0, gt=0, le=10_000)
+    daily_loss_limit: float = Field(default=15.0, gt=0, le=100_000)
+    sleep_s: float | None = Field(default=None, ge=0.0, le=MAX_SLEEP_S)
+    continuous: bool = True
+    cycles: int | None = Field(default=None, ge=1, le=MAX_CYCLES)
+    live: bool | None = None
+    mode: str | None = None
+
+    @model_validator(mode="after")
+    def reject_live(self) -> "StartRequest":
+        _reject_live(self.live, self.mode)
         return self
 
 
@@ -69,7 +92,10 @@ class RunController:
         self.runner = runner
         self.cfg = cfg
         self._lock = threading.Lock()
+        self._stop = threading.Event()
         self.running = False
+        self.stopping = False
+        self.continuous = False
         self.logs: deque[str] = deque(maxlen=300)
         self.cycles_done = 0
         self.cycles_total = 0
@@ -82,6 +108,8 @@ class RunController:
         with self._lock:
             return {
                 "running": self.running,
+                "stopping": self.stopping,
+                "continuous": self.continuous,
                 "cycles_done": self.cycles_done,
                 "cycles_total": self.cycles_total,
                 "fills_this_run": self.fills_this_run,
@@ -92,25 +120,42 @@ class RunController:
                 "mode": "paper",
             }
 
-    def start(self, cycles: int, sleep_s: float | None) -> dict[str, Any]:
+    def start(
+        self,
+        cycles: int,
+        sleep_s: float | None,
+        continuous: bool = False,
+    ) -> dict[str, Any]:
         with self._lock:
             if self.running:
                 raise RuntimeError("paper-run already in progress")
             self.running = True
+            self.stopping = False
+            self.continuous = continuous
             self.cycles_done = 0
-            self.cycles_total = cycles
+            self.cycles_total = 0 if continuous else cycles
             self.fills_this_run = 0
             self.last_error = None
             self.started_at = utc_now_iso()
             self.finished_at = None
             self.logs.clear()
+            self._stop.clear()
             thread = threading.Thread(
                 target=self._run,
-                args=(cycles, sleep_s),
+                args=(cycles, sleep_s, continuous),
                 name="paper-run",
                 daemon=True,
             )
             thread.start()
+        return self.snapshot()
+
+    def stop(self) -> dict[str, Any]:
+        with self._lock:
+            if not self.running:
+                return self.snapshot()
+            self.stopping = True
+        self._stop.set()
+        self._log("stop requested — finishing current cycle (paper mode)")
         return self.snapshot()
 
     def _log(self, message: str) -> None:
@@ -118,15 +163,30 @@ class RunController:
         with self._lock:
             self.logs.append(line)
 
-    def _run(self, cycles: int, sleep_s: float | None) -> None:
+    def _sleep(self, seconds: float) -> None:
+        if seconds <= 0:
+            return
+        self._stop.wait(seconds)
+
+    def _run(self, cycles: int, sleep_s: float | None, continuous: bool) -> None:
         interval = self.cfg.cycle_sleep_s if sleep_s is None else sleep_s
         try:
-            self._log(
-                f"PAPER MODE ONLY — starting {cycles} cycle(s); "
-                "live orders disabled; can_size_up stays locked"
-            )
-            for index in range(cycles):
-                self._log(f"cycle {index + 1}/{cycles}: scanning open tennis markets")
+            if continuous:
+                self._log(
+                    "PAPER MODE ONLY — Start: polling tennis markets until Stop; "
+                    "live orders disabled; can_size_up stays locked"
+                )
+            else:
+                self._log(
+                    f"PAPER MODE ONLY — starting {cycles} cycle(s); "
+                    "live orders disabled; can_size_up stays locked"
+                )
+            index = 0
+            while not self._stop.is_set():
+                if not continuous and index >= cycles:
+                    break
+                label = f"{index + 1}" if continuous else f"{index + 1}/{cycles}"
+                self._log(f"cycle {label}: scanning open tennis markets")
                 fills = self.runner.run_once()
                 with self._lock:
                     self.cycles_done = index + 1
@@ -144,19 +204,30 @@ class RunController:
                         "no paper fills: net edge after spread+fee did not clear "
                         "threshold, or risk blocked"
                     )
-                if index + 1 < cycles:
-                    self._log(f"sleep {interval:g}s before next cycle")
-                    time.sleep(interval)
-            self._log(
-                f"done cycles={cycles} fills_this_run={self.fills_this_run} "
-                f"can_size_up=false (locked allow_size_up={self.cfg.allow_size_up})"
-            )
+                index += 1
+                if not continuous and index >= cycles:
+                    break
+                if self._stop.is_set():
+                    break
+                self._log(f"sleep {interval:g}s before next cycle")
+                self._sleep(interval)
+            if self._stop.is_set():
+                self._log(
+                    f"stopped cycles={self.cycles_done} fills_this_run={self.fills_this_run} "
+                    "can_size_up=false (locked)"
+                )
+            else:
+                self._log(
+                    f"done cycles={self.cycles_done} fills_this_run={self.fills_this_run} "
+                    f"can_size_up=false (locked allow_size_up={self.cfg.allow_size_up})"
+                )
         except Exception as exc:  # noqa: BLE001 — surface in the UI log
             self.last_error = str(exc)
             self._log(f"error: {exc}")
         finally:
             with self._lock:
                 self.running = False
+                self.stopping = False
                 self.finished_at = utc_now_iso()
 
 
@@ -166,8 +237,10 @@ class DashboardService:
         cfg: AppConfig,
         client: KalshiPublicClient | None = None,
         runner: PaperRunner | None = None,
+        config_path: Path | None = None,
     ):
         self.cfg = cfg
+        self.config_path = Path(config_path) if config_path else None
         self.client = client or KalshiPublicClient(cfg)
         self.owns_client = client is None
         self.runner = runner or PaperRunner(cfg, client=self.client)
@@ -177,6 +250,138 @@ class DashboardService:
         self.runner.close()
         if self.owns_client:
             self.client.close()
+
+    def bind_config(self, cfg: AppConfig) -> None:
+        self.cfg = cfg
+        self.controller.cfg = cfg
+        runner = self.runner
+        runner.cfg = cfg
+        if getattr(runner, "signal", None) is not None:
+            runner.signal.cfg = cfg
+        if getattr(runner, "risk", None) is not None:
+            runner.risk.cfg = cfg
+        if getattr(runner, "paper", None) is not None:
+            runner.paper.cfg = cfg
+
+    def apply_session(
+        self,
+        starting_cash: float,
+        max_dollars_per_ticker: float,
+        daily_loss_limit: float,
+        cycle_sleep_s: float | None = None,
+    ) -> dict[str, Any]:
+        sleep_s = self.cfg.cycle_sleep_s if cycle_sleep_s is None else cycle_sleep_s
+        cfg = replace(
+            self.cfg,
+            starting_cash=float(starting_cash),
+            max_dollars_per_ticker=float(max_dollars_per_ticker),
+            daily_loss_limit=float(daily_loss_limit),
+            cycle_sleep_s=float(sleep_s),
+            live_enabled=False,
+        )
+        self.bind_config(cfg)
+        applied = _apply_bankroll_state(cfg)
+        persisted = _persist_session(cfg, self.config_path)
+        return {
+            "paper_mode": True,
+            "live_enabled": False,
+            "starting_cash": cfg.starting_cash,
+            "max_dollars_per_ticker": cfg.max_dollars_per_ticker,
+            "daily_loss_limit": cfg.daily_loss_limit,
+            "cycle_sleep_s": cfg.cycle_sleep_s,
+            "can_size_up": False,
+            "allow_size_up": cfg.allow_size_up,
+            "state": applied,
+            "persisted": persisted,
+        }
+
+
+def _session_path(cfg: AppConfig) -> Path:
+    return cfg.state_path.parent / "dashboard_session.json"
+
+
+def _read_session(cfg: AppConfig) -> dict[str, Any]:
+    path = _session_path(cfg)
+    if not path.exists():
+        return {}
+    try:
+        raw = json.loads(path.read_text())
+    except (OSError, json.JSONDecodeError):
+        return {}
+    return raw if isinstance(raw, dict) else {}
+
+
+def _cfg_from_session(cfg: AppConfig) -> AppConfig:
+    raw = _read_session(cfg)
+    if not raw:
+        return cfg
+    return replace(
+        cfg,
+        starting_cash=float(raw.get("starting_cash", cfg.starting_cash)),
+        max_dollars_per_ticker=float(raw.get("max_dollars_per_ticker", cfg.max_dollars_per_ticker)),
+        daily_loss_limit=float(raw.get("daily_loss_limit", cfg.daily_loss_limit)),
+        cycle_sleep_s=float(raw.get("cycle_sleep_s", cfg.cycle_sleep_s)),
+        live_enabled=False,
+    )
+
+
+def _persist_session(cfg: AppConfig, config_path: Path | None) -> dict[str, bool]:
+    payload = {
+        "starting_cash": cfg.starting_cash,
+        "max_dollars_per_ticker": cfg.max_dollars_per_ticker,
+        "daily_loss_limit": cfg.daily_loss_limit,
+        "cycle_sleep_s": cfg.cycle_sleep_s,
+        "paper_mode": True,
+        "live_enabled": False,
+    }
+    path = _session_path(cfg)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n")
+    wrote_yaml = False
+    if config_path is not None and config_path.exists():
+        wrote_yaml = _patch_config_yaml(config_path, cfg)
+    return {"session_json": True, "config_yaml": wrote_yaml}
+
+
+def _yaml_num(value: float) -> str:
+    if float(value).is_integer():
+        return f"{int(value)}.0"
+    return repr(float(value))
+
+
+def _patch_config_yaml(path: Path, cfg: AppConfig) -> bool:
+    text = path.read_text()
+    updates = {
+        "starting_cash": cfg.starting_cash,
+        "max_dollars_per_ticker": cfg.max_dollars_per_ticker,
+        "daily_loss_limit": cfg.daily_loss_limit,
+        "cycle_sleep_s": cfg.cycle_sleep_s,
+    }
+    patched = text
+    for key, value in updates.items():
+        pattern = re.compile(rf"^(\s*{re.escape(key)}:\s*)[-+0-9.eE]+", re.M)
+        patched, count = pattern.subn(rf"\g<1>{_yaml_num(value)}", patched, count=1)
+        if count != 1:
+            return False
+    if patched != text:
+        path.write_text(patched)
+    return True
+
+
+def _apply_bankroll_state(cfg: AppConfig) -> str:
+    state = load_state(cfg)
+    has_book = bool(state.positions) or state.fill_count > 0
+    if not has_book:
+        save_state(cfg, new_state(cfg))
+        return "initialized"
+    if abs(state.starting_cash - cfg.starting_cash) <= 1e-9:
+        return "unchanged"
+    delta = cfg.starting_cash - state.starting_cash
+    state.starting_cash = cfg.starting_cash
+    state.cash += delta
+    state.start_of_day_equity += delta
+    save_state(cfg, state)
+    return "rebased"
 
 
 def _coerce_fill(row: dict[str, Any]) -> dict[str, Any]:
@@ -227,9 +432,12 @@ def _pnl_payload(service: DashboardService) -> dict[str, Any]:
     summary["kill_reason"] = state.kill_reason
     summary["cash"] = state.cash
     summary["starting_cash"] = state.starting_cash
+    if state.fill_count:
+        summary["running_pnl"] = state.running_pnl()
     summary["fill_count_state"] = state.fill_count
     summary["allow_size_up"] = service.cfg.allow_size_up
     summary["min_fills_before_size_up"] = service.cfg.min_fills_before_size_up
+    summary["max_dollars_per_ticker"] = service.cfg.max_dollars_per_ticker
     summary["daily_loss_limit"] = service.cfg.daily_loss_limit
     summary["paper_mode"] = True
     summary["live_enabled"] = False
@@ -253,6 +461,7 @@ def _status_payload(service: DashboardService) -> dict[str, Any]:
         "kill_reason": state.kill_reason,
         "starting_cash": state.starting_cash,
         "cash": state.cash,
+        "max_dollars_per_ticker": service.cfg.max_dollars_per_ticker,
         "daily_loss_limit": service.cfg.daily_loss_limit,
         "cycle_sleep_s": service.cfg.cycle_sleep_s,
         "series_tickers": list(service.cfg.series_tickers),
@@ -265,11 +474,17 @@ def create_app(
     cfg: AppConfig | None = None,
     client: KalshiPublicClient | None = None,
     runner: PaperRunner | None = None,
+    config_path: Path | None = None,
 ) -> FastAPI:
     if cfg is None:
         default_path = Path("config.yaml")
-        cfg = load_config(default_path) if default_path.exists() else load_config()
-    service = DashboardService(cfg, client=client, runner=runner)
+        if config_path is None and default_path.exists():
+            config_path = default_path
+        cfg = load_config(config_path) if config_path and Path(config_path).exists() else load_config()
+    elif config_path is not None:
+        config_path = Path(config_path)
+    cfg = _cfg_from_session(cfg)
+    service = DashboardService(cfg, client=client, runner=runner, config_path=config_path)
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
@@ -339,10 +554,32 @@ def create_app(
     @app.post("/api/run")
     def start_run(body: RunRequest) -> dict[str, Any]:
         try:
-            snapshot = service.controller.start(body.cycles, body.sleep_s)
+            snapshot = service.controller.start(body.cycles, body.sleep_s, continuous=False)
         except RuntimeError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
         return snapshot
+
+    @app.post("/api/start")
+    def start_session(body: StartRequest) -> dict[str, Any]:
+        if service.controller.snapshot()["running"]:
+            raise HTTPException(status_code=409, detail="paper-run already in progress")
+        session = service.apply_session(
+            starting_cash=body.starting_cash,
+            max_dollars_per_ticker=body.max_dollars_per_ticker,
+            daily_loss_limit=body.daily_loss_limit,
+            cycle_sleep_s=body.sleep_s,
+        )
+        continuous = bool(body.continuous) or body.cycles is None
+        cycles = 1 if continuous else int(body.cycles or 1)
+        try:
+            run = service.controller.start(cycles, body.sleep_s, continuous=continuous)
+        except RuntimeError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        return {"session": session, "run": run, "paper_mode": True, "live_enabled": False}
+
+    @app.post("/api/stop")
+    def stop_session() -> dict[str, Any]:
+        return service.controller.stop()
 
     return app
 
@@ -352,10 +589,11 @@ def serve(
     host: str = DEFAULT_HOST,
     port: int = DEFAULT_PORT,
     open_browser: bool = False,
+    config_path: Path | None = None,
 ) -> None:
     import uvicorn
 
-    app = create_app(cfg)
+    app = create_app(cfg, config_path=config_path)
     if host not in _LOOPBACK:
         print(
             "warning: binding beyond localhost; the UI still cannot place live orders",
