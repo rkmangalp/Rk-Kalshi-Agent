@@ -48,7 +48,8 @@ def main(argv: list[str] | None = None) -> int:
     )
 
     args = parser.parse_args(argv)
-    cfg = load_config(Path(args.config)) if Path(args.config).exists() else load_config()
+    config_path = Path(args.config) if Path(args.config).exists() else None
+    cfg = load_config(config_path) if config_path else load_config()
 
     if args.command == "list-tennis-markets":
         return _cmd_list(cfg)
@@ -61,7 +62,13 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "show-pnl":
         return _cmd_show_pnl(cfg)
     if args.command in {"dashboard", "serve"}:
-        return _cmd_dashboard(cfg, host=args.host, port=args.port, open_browser=args.open)
+        return _cmd_dashboard(
+            cfg,
+            host=args.host,
+            port=args.port,
+            open_browser=args.open,
+            config_path=config_path,
+        )
     parser.error(f"unknown command {args.command}")
     return 2
 
@@ -150,7 +157,7 @@ def _format_market(market: MarketSnapshot) -> str:
     )
 
 
-def _cmd_dashboard(cfg, host: str, port: int, open_browser: bool) -> int:
+def _cmd_dashboard(cfg, host: str, port: int, open_browser: bool, config_path=None) -> int:
     try:
         from rk_kalshi.dashboard import serve
     except ImportError:
@@ -163,7 +170,7 @@ def _cmd_dashboard(cfg, host: str, port: int, open_browser: bool) -> int:
     if port < 1 or port > 65535:
         print("error: --port must be 1..65535", file=sys.stderr)
         return 2
-    serve(cfg, host=host, port=port, open_browser=open_browser)
+    serve(cfg, host=host, port=port, open_browser=open_browser, config_path=config_path)
     return 0
 
 

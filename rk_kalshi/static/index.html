@@ -22,6 +22,40 @@
     </div>
   </header>
 
+  <section id="start-panel" class="start-panel" aria-label="Start paper session">
+    <div class="start-copy">
+      <p class="eyebrow">Paper session</p>
+      <h2>Start paper trading</h2>
+      <p class="lede">
+        Set a paper bankroll, then Start. This is simulated cash only — the UI
+        cannot place live Kalshi orders. <code>can_size_up</code> stays locked.
+      </p>
+    </div>
+    <form id="start-form" class="start-form">
+      <label>
+        Paper bankroll ($)
+        <input id="starting-cash" name="starting_cash" type="number" min="1" max="100000" step="1" value="100">
+      </label>
+      <label>
+        Max $ per trade
+        <input id="max-per-trade" name="max_dollars_per_ticker" type="number" min="0.01" max="10000" step="0.01" value="5">
+      </label>
+      <label>
+        Daily loss limit ($)
+        <input id="daily-loss" name="daily_loss_limit" type="number" min="0.01" max="100000" step="0.01" value="15">
+      </label>
+      <label>
+        Poll interval (s)
+        <input id="start-sleep" name="sleep_s" type="number" min="0" max="3600" step="0.5" value="15">
+      </label>
+      <div class="start-actions">
+        <button type="button" id="btn-start" class="primary start-btn">Start</button>
+        <button type="button" id="btn-stop" class="stop-btn" hidden>Stop</button>
+      </div>
+      <p class="fine" id="start-hint">Defaults come from config.yaml and last Start (paper only).</p>
+    </form>
+  </section>
+
   <section class="summary" id="summary-cards" aria-label="P&amp;L summary">
     <article class="card">
       <h2>Fills</h2>
@@ -66,10 +100,10 @@
           <input id="sleep" type="number" min="0" max="3600" step="0.5" value="15">
         </label>
         <div class="run-actions">
-          <button type="button" id="btn-once" class="primary">Run once</button>
+          <button type="button" id="btn-once">Run once</button>
           <button type="button" id="btn-cycles">Run N cycles</button>
         </div>
-        <p class="fine">Always paper: fills at live YES mid. The UI cannot arm live Kalshi orders.</p>
+        <p class="fine">Advanced: finite cycles. Prefer Start / Stop above. Always paper — no live orders.</p>
       </form>
     </article>
 
