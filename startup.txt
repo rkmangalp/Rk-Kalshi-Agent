@@ -1,0 +1,6 @@
+git checkout main
+git pull
+
+.\.venv\Scripts\Activate.ps1
+pip install -r requirements.txt
+python -m rk_kalshi dashboard

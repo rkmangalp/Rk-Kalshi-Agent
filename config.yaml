@@ -13,12 +13,12 @@ kalshi:
   page_limit: 200
 
 bankroll:
-  starting_cash: 100.0
+  starting_cash: 1000.0
 
 risk:
   # Max dollars of exposure per market ticker (not per-contract price).
-  max_dollars_per_ticker: 5.0
-  daily_loss_limit: 15.0
+  max_dollars_per_ticker: 200.0
+  daily_loss_limit: 500.0
   # Martingale is forbidden in code even if this is flipped.
   allow_martingale: false
 
@@ -46,7 +46,7 @@ paper:
   fill_log_csv: data/fills.csv
   fill_log_jsonl: data/fills.jsonl
   state_path: data/paper_state.json
-  cycle_sleep_s: 15.0
+  cycle_sleep_s: 50.0
   max_signals_per_cycle: 8
 
 live:
