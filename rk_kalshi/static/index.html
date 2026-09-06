@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Rk Kalshi Paper Desk</title>
+  <link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+  <div class="banner" role="status">
+    PAPER MODE ONLY — no live orders
+  </div>
+
+  <header class="top">
+    <div>
+      <p class="eyebrow">Rk-Kalshi-Agent</p>
+      <h1>Tennis paper desk</h1>
+    </div>
+    <div class="top-meta">
+      <span class="pill lock" id="size-pill">can_size_up locked</span>
+      <span class="pill ok" id="kill-pill">kill-switch clear</span>
+    </div>
+  </header>
+
+  <section class="summary" id="summary-cards" aria-label="P&amp;L summary">
+    <article class="card">
+      <h2>Fills</h2>
+      <p class="metric" id="metric-fills">0</p>
+      <p class="hint" id="hint-fills">from data/fills.csv</p>
+    </article>
+    <article class="card">
+      <h2>Running P&amp;L</h2>
+      <p class="metric" id="metric-pnl">0.0000</p>
+      <p class="hint">mark-to-market vs starting cash</p>
+    </article>
+    <article class="card">
+      <h2>Realized</h2>
+      <p class="metric" id="metric-realized">0.0000</p>
+      <p class="hint" id="hint-cash">cash —</p>
+    </article>
+    <article class="card">
+      <h2>can_size_up</h2>
+      <p class="metric lock-text" id="metric-size">false</p>
+      <p class="hint" id="hint-size">allow_size_up=false · min 200 fills</p>
+    </article>
+    <article class="card">
+      <h2>Kill-switch</h2>
+      <p class="metric" id="metric-kill">off</p>
+      <p class="hint" id="hint-kill">daily loss limit</p>
+    </article>
+  </section>
+
+  <section class="grid">
+    <article class="panel">
+      <div class="panel-head">
+        <h2>Paper-run controls</h2>
+        <span class="muted" id="run-state">idle</span>
+      </div>
+      <form id="run-form" class="run-form">
+        <label>
+          Cycles
+          <input id="cycles" type="number" min="1" max="500" value="1">
+        </label>
+        <label>
+          Poll interval (s)
+          <input id="sleep" type="number" min="0" max="3600" step="0.5" value="15">
+        </label>
+        <div class="run-actions">
+          <button type="button" id="btn-once" class="primary">Run once</button>
+          <button type="button" id="btn-cycles">Run N cycles</button>
+        </div>
+        <p class="fine">Always paper: fills at live YES mid. The UI cannot arm live Kalshi orders.</p>
+      </form>
+    </article>
+
+    <article class="panel log-panel">
+      <div class="panel-head">
+        <h2>Live log</h2>
+        <span class="muted" id="log-count">0 lines</span>
+      </div>
+      <pre id="log" class="log" aria-live="polite">Waiting for a paper-run…</pre>
+    </article>
+  </section>
+
+  <section class="panel">
+    <div class="panel-head">
+      <h2>Open tennis markets</h2>
+      <div class="toolbar">
+        <label class="inline">
+          <input type="checkbox" id="auto-markets">
+          Auto-refresh
+        </label>
+        <button type="button" id="btn-markets">Refresh</button>
+        <span class="muted" id="markets-meta">—</span>
+      </div>
+    </div>
+    <div class="table-wrap">
+      <table id="markets-table">
+        <thead>
+          <tr>
+            <th>Ticker</th>
+            <th>Match / event</th>
+            <th class="num">Bid</th>
+            <th class="num">Ask</th>
+            <th class="num">Mid</th>
+            <th class="num">Last</th>
+            <th class="num">Spread ¢</th>
+            <th class="num">Volume</th>
+          </tr>
+        </thead>
+        <tbody id="markets-body">
+          <tr><td colspan="8" class="empty">Loading markets…</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="panel">
+    <div class="panel-head">
+      <h2>Paper fills</h2>
+      <span class="muted" id="fills-meta">locked schema · newest first</span>
+    </div>
+    <div class="table-wrap">
+      <table id="fills-table">
+        <thead>
+          <tr>
+            <th>timestamp</th>
+            <th>ticker</th>
+            <th>side</th>
+            <th class="num">fill_price</th>
+            <th class="num">live_mid</th>
+            <th class="num">edge_cents</th>
+            <th class="num">running_pnl</th>
+            <th>event_name</th>
+            <th>match_id</th>
+            <th>can_size_up</th>
+            <th>edge_thesis</th>
+          </tr>
+        </thead>
+        <tbody id="fills-body">
+          <tr><td colspan="11" class="empty">No paper fills yet.</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <footer>
+    <span id="footer-meta">localhost · paper_mode=true · live.enabled cannot be turned on from this UI</span>
+  </footer>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>

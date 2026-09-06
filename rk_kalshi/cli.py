@@ -30,6 +30,23 @@ def main(argv: list[str] | None = None) -> int:
 
     sub.add_parser("show-pnl", help="Summarize paper fill logs")
 
+    dash = sub.add_parser(
+        "dashboard",
+        aliases=["serve"],
+        help="Local paper-trading web dashboard (localhost, no live orders)",
+    )
+    dash.add_argument(
+        "--host",
+        default="127.0.0.1",
+        help="Bind address (default: 127.0.0.1 localhost only)",
+    )
+    dash.add_argument("--port", type=int, default=8765, help="Port (default: 8765)")
+    dash.add_argument(
+        "--open",
+        action="store_true",
+        help="Open the dashboard URL in a browser",
+    )
+
     args = parser.parse_args(argv)
     cfg = load_config(Path(args.config)) if Path(args.config).exists() else load_config()
 
@@ -43,6 +60,8 @@ def main(argv: list[str] | None = None) -> int:
         return _cmd_paper_run(cfg, cycles=cycles, sleep_s=args.sleep)
     if args.command == "show-pnl":
         return _cmd_show_pnl(cfg)
+    if args.command in {"dashboard", "serve"}:
+        return _cmd_dashboard(cfg, host=args.host, port=args.port, open_browser=args.open)
     parser.error(f"unknown command {args.command}")
     return 2
 
@@ -129,6 +148,23 @@ def _format_market(market: MarketSnapshot) -> str:
         f"{(mid if mid is not None else 0):6.3f} {market.last_price:6.3f} "
         f"{(spr if spr is not None else 0):5.1f} {market.volume:8.1f}"
     )
+
+
+def _cmd_dashboard(cfg, host: str, port: int, open_browser: bool) -> int:
+    try:
+        from rk_kalshi.dashboard import serve
+    except ImportError:
+        print(
+            "error: dashboard extras missing — pip install -r requirements.txt "
+            "(fastapi, uvicorn)",
+            file=sys.stderr,
+        )
+        return 2
+    if port < 1 or port > 65535:
+        print("error: --port must be 1..65535", file=sys.stderr)
+        return 2
+    serve(cfg, host=host, port=port, open_browser=open_browser)
+    return 0
 
 
 def _clip(text: str, width: int) -> str:

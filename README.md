@@ -51,7 +51,8 @@ Kalshi public REST  →  TennisSignalEngine  →  RiskManager  →  PaperExecuti
 python3 -m pip install -r requirements.txt
 ```
 
-Dependencies are intentionally small: `httpx`, `pyyaml`.
+Dependencies are intentionally small: `httpx`, `pyyaml`, plus `fastapi` and
+`uvicorn` for the local dashboard.
 
 ## CLI
 
@@ -67,9 +68,47 @@ python3 -m rk_kalshi paper-run --cycles 3 --sleep 5
 
 # Summarize data/fills.csv
 python3 -m rk_kalshi show-pnl
+
+# Local web dashboard (localhost only, paper mode locked)
+python3 -m rk_kalshi dashboard
 ```
 
 Optional: `python3 -m pip install -e .` then `rk-kalshi list-tennis-markets`.
+
+## Dashboard (Windows)
+
+The dashboard is a local FastAPI app: open tennis markets, trigger paper-runs,
+and read fills / P&L. It **cannot** place live orders. `can_size_up` stays
+locked. Default bind is `127.0.0.1:8765`.
+
+From Command Prompt:
+
+```bat
+cd path\to\Rk-Kalshi-Agent
+python -m venv .venv
+.venv\Scripts\activate.bat
+python -m pip install -r requirements.txt
+python -m rk_kalshi dashboard
+```
+
+From PowerShell:
+
+```powershell
+cd path\to\Rk-Kalshi-Agent
+python -m venv .venv
+.venv\Scripts\Activate.ps1
+python -m pip install -r requirements.txt
+python -m rk_kalshi dashboard
+```
+
+Then open [http://127.0.0.1:8765](http://127.0.0.1:8765) in a browser.
+
+Equivalent: `python -m rk_kalshi serve`. Optional `--port 8765`, `--open` to
+launch the browser, `--host 127.0.0.1`. Do not point this UI at a public
+interface unless you understand it still paper-trades only.
+
+Existing CLI commands (`list-tennis-markets`, `paper-run`, `show-pnl`) are
+unchanged.
 
 ## Config
 

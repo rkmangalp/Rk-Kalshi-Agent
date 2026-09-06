@@ -11,6 +11,8 @@ requires-python = ">=3.10"
 dependencies = [
     "httpx>=0.27",
     "pyyaml>=6.0",
+    "fastapi>=0.115",
+    "uvicorn>=0.32",
 ]
 
 [project.scripts]
@@ -18,3 +20,6 @@ rk-kalshi = "rk_kalshi.cli:main"
 
 [tool.setuptools.packages.find]
 include = ["rk_kalshi*"]
+
+[tool.setuptools.package-data]
+rk_kalshi = ["static/*"]
