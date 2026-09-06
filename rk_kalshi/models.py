@@ -218,12 +218,12 @@ def select_bitcoin_tradeable(
     return kept
 
 
-def select_targeted_tennis(
+def select_targeted_markets(
     markets: list[MarketSnapshot],
     event_ticker: str = "",
     market_ticker: str = "",
 ) -> list[MarketSnapshot]:
-    """Keep one pasted/selected tennis match (or a single market on that match)."""
+    """Keep one pasted/selected event (or a single market on that event)."""
     market_key = (market_ticker or "").strip().upper()
     event_key = (event_ticker or "").strip().upper()
     if market_key:
@@ -239,6 +239,9 @@ def select_targeted_tennis(
         for m in markets
         if m.event_ticker.upper() == event_key or m.match_id.upper() == event_key
     ]
+
+
+select_targeted_tennis = select_targeted_markets
 
 
 def select_in_play(

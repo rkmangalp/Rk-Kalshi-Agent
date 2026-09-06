@@ -26,7 +26,7 @@ from pydantic import BaseModel, Field, model_validator
 from rk_kalshi.client import KalshiPublicClient
 from rk_kalshi.config import AppConfig, load_config
 from rk_kalshi.journal import clear_fill_logs, read_fills, summarize_pnl
-from rk_kalshi.kalshi_url import EXAMPLE_URLS, KalshiTennisUrlError, parse_tennis_contract
+from rk_kalshi.kalshi_url import EXAMPLE_CONTRACT_URLS, KalshiUrlError, parse_contract
 from rk_kalshi.models import MarketSnapshot, select_bitcoin_tradeable
 from rk_kalshi.risk import RiskManager
 from rk_kalshi.runner import PaperRunner
@@ -214,9 +214,10 @@ class RunController:
             if continuous:
                 target = self.cfg.target_event_ticker or self.cfg.target_label
                 if target:
+                    kind = self.cfg.target_asset_class or "contract"
                     self._log(
-                        f"PAPER MODE ONLY — Start: paper-trading selected tennis "
-                        f"match {target} only; live orders disabled; can_size_up stays locked"
+                        f"PAPER MODE ONLY — Start: paper-trading selected {kind} "
+                        f"{target} only; live orders disabled; can_size_up stays locked"
                     )
                 else:
                     self._log(
@@ -234,8 +235,9 @@ class RunController:
                     break
                 label = f"{index + 1}" if continuous else f"{index + 1}/{cycles}"
                 if self.cfg.target_event_ticker:
+                    kind = self.cfg.target_asset_class or "contract"
                     self._log(
-                        f"cycle {label}: scanning selected tennis match "
+                        f"cycle {label}: scanning selected {kind} "
                         f"{self.cfg.target_event_ticker}"
                     )
                 else:
@@ -320,6 +322,10 @@ class DashboardService:
         self.owns_client = client is None
         self.runner = runner or PaperRunner(cfg, client=self.client)
         self.controller = RunController(self.runner, cfg)
+        self.last_contract_error = ""
+
+    def target_payload(self, cfg: AppConfig | None = None) -> dict[str, Any]:
+        return _target_payload(cfg or self.cfg, self.last_contract_error)
 
     def close(self) -> None:
         self.runner.close()
@@ -370,6 +376,7 @@ class DashboardService:
                 self.cfg.target_market_ticker if target_market_ticker is None else target_market_ticker
             ),
             target_label=self.cfg.target_label if target_label is None else target_label,
+            target_asset_class=self.cfg.target_asset_class,
             live_enabled=False,
         )
         self.bind_config(cfg)
@@ -385,7 +392,7 @@ class DashboardService:
             "live_matches_only": cfg.live_matches_only,
             "trade_bitcoin": cfg.trade_bitcoin,
             "trade_tennis": cfg.trade_tennis,
-            "target": _target_payload(cfg),
+            "target": self.target_payload(cfg),
             "can_size_up": False,
             "allow_size_up": cfg.allow_size_up,
             "state": applied,
@@ -395,12 +402,14 @@ class DashboardService:
     def set_contract(self, body: ContractRequest) -> dict[str, Any]:
         raw = (body.url or body.market_ticker or body.event_ticker or "").strip()
         if not raw:
+            self.last_contract_error = ""
             cfg = replace(
                 self.cfg,
                 target_url="",
                 target_event_ticker="",
                 target_market_ticker="",
                 target_label="",
+                target_asset_class="",
                 live_enabled=False,
             )
             self.bind_config(cfg)
@@ -409,20 +418,25 @@ class DashboardService:
                 "paper_mode": True,
                 "live_enabled": False,
                 "contract": None,
-                "target": _target_payload(cfg),
+                "target": self.target_payload(cfg),
             }
         try:
-            parsed = parse_tennis_contract(raw)
-        except KalshiTennisUrlError as exc:
+            parsed = parse_contract(raw)
+        except KalshiUrlError as exc:
+            self.last_contract_error = str(exc)
             raise HTTPException(status_code=400, detail=str(exc)) from exc
+        self.last_contract_error = ""
         label = parsed.event_ticker
+        is_crypto = parsed.asset_class == "bitcoin"
         cfg = replace(
             self.cfg,
             target_url=parsed.raw if parsed.source == "url" else "",
             target_event_ticker=parsed.event_ticker,
             target_market_ticker=parsed.market_ticker or "",
             target_label=label,
-            trade_tennis=True,
+            target_asset_class=parsed.asset_class,
+            trade_tennis=True if not is_crypto else self.cfg.trade_tennis,
+            trade_bitcoin=True if is_crypto else self.cfg.trade_bitcoin,
             live_enabled=False,
         )
         self.bind_config(cfg)
@@ -431,7 +445,7 @@ class DashboardService:
             "paper_mode": True,
             "live_enabled": False,
             "contract": parsed.as_dict() | {"label": label},
-            "target": _target_payload(cfg),
+            "target": self.target_payload(cfg),
         }
 
     def clear_session(self) -> dict[str, Any]:
@@ -446,8 +460,10 @@ class DashboardService:
             target_event_ticker="",
             target_market_ticker="",
             target_label="",
+            target_asset_class="",
             live_enabled=False,
         )
+        self.last_contract_error = ""
         self.bind_config(cfg)
         _persist_session(cfg, self.config_path)
         run = self.controller.reset_ui_state()
@@ -455,22 +471,24 @@ class DashboardService:
             "paper_mode": True,
             "live_enabled": False,
             "archived_to": archived,
-            "target": _target_payload(cfg),
+            "target": self.target_payload(cfg),
             "run": run,
             "cleared": True,
             "note": "Cleared local paper session only — not a live Kalshi account.",
         }
 
 
-def _target_payload(cfg: AppConfig) -> dict[str, Any]:
+def _target_payload(cfg: AppConfig, error: str = "") -> dict[str, Any]:
     return {
         "url": cfg.target_url,
         "event_ticker": cfg.target_event_ticker,
         "market_ticker": cfg.target_market_ticker,
         "match_id": cfg.target_event_ticker,
         "label": cfg.target_label or cfg.target_event_ticker,
+        "asset_class": cfg.target_asset_class,
         "active": bool(cfg.target_event_ticker or cfg.target_market_ticker),
-        "examples": list(EXAMPLE_URLS),
+        "error": error,
+        "examples": list(EXAMPLE_CONTRACT_URLS),
     }
 
 
@@ -519,6 +537,7 @@ def _cfg_from_session(cfg: AppConfig) -> AppConfig:
         target_event_ticker=str(raw.get("target_event_ticker") or cfg.target_event_ticker),
         target_market_ticker=str(raw.get("target_market_ticker") or cfg.target_market_ticker),
         target_label=str(raw.get("target_label") or cfg.target_label),
+        target_asset_class=str(raw.get("target_asset_class") or cfg.target_asset_class),
         live_enabled=False,
     )
 
@@ -536,6 +555,7 @@ def _persist_session(cfg: AppConfig, config_path: Path | None) -> dict[str, bool
         "target_event_ticker": cfg.target_event_ticker,
         "target_market_ticker": cfg.target_market_ticker,
         "target_label": cfg.target_label,
+        "target_asset_class": cfg.target_asset_class,
         "paper_mode": True,
         "live_enabled": False,
     }
@@ -678,7 +698,7 @@ def _status_payload(service: DashboardService) -> dict[str, Any]:
         "trade_bitcoin": service.cfg.trade_bitcoin,
         "trade_tennis": service.cfg.trade_tennis,
         "bitcoin_series_tickers": list(service.cfg.bitcoin_series_tickers),
-        "target": _target_payload(service.cfg),
+        "target": service.target_payload(),
         "run": service.controller.snapshot(),
     }
 
@@ -831,8 +851,8 @@ def create_app(
         return {
             "paper_mode": True,
             "live_enabled": False,
-            "target": _target_payload(service.cfg),
-            "examples": list(EXAMPLE_URLS),
+            "target": service.target_payload(),
+            "examples": list(EXAMPLE_CONTRACT_URLS),
         }
 
     @app.post("/api/contract")

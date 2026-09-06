@@ -12,7 +12,7 @@ from rk_kalshi.models import (
     Signal,
     select_bitcoin_tradeable,
     select_in_play,
-    select_targeted_tennis,
+    select_targeted_markets,
 )
 from rk_kalshi.risk import RiskManager
 from rk_kalshi.signal import TennisSignalEngine
@@ -81,23 +81,23 @@ class PaperRunner:
         }
         targeted: list[MarketSnapshot] = []
         has_target = bool(self.cfg.target_event_ticker or self.cfg.target_market_ticker)
+        pool: list[MarketSnapshot] = []
+        if self.cfg.trade_tennis:
+            pool.extend(tennis if has_target else (live if self.cfg.live_matches_only else tennis))
+        if self.cfg.trade_bitcoin:
+            pool.extend(bitcoin)
         if has_target:
-            targeted = select_targeted_tennis(
-                tennis,
+            targeted = select_targeted_markets(
+                pool,
                 event_ticker=self.cfg.target_event_ticker,
                 market_ticker=self.cfg.target_market_ticker,
             )
-            tennis_tradeable = targeted
+            tradeable = targeted
         else:
-            tennis_tradeable = live if self.cfg.live_matches_only else tennis
+            tradeable = pool
         self.last_scan["targeted"] = len(targeted)
         self.last_scan["target_event_ticker"] = self.cfg.target_event_ticker
         self.last_scan["target_market_ticker"] = self.cfg.target_market_ticker
-        tradeable: list[MarketSnapshot] = []
-        if self.cfg.trade_tennis:
-            tradeable.extend(tennis_tradeable)
-        if self.cfg.trade_bitcoin:
-            tradeable.extend(bitcoin)
         marks = {m.ticker: m.yes_mid for m in tradeable if m.yes_mid is not None}
         if self.risk.kill_switch_hit(state, marks):
             state.killed = True

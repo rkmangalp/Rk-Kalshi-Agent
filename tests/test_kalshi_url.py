@@ -1,6 +1,14 @@
 import unittest
 
-from rk_kalshi.kalshi_url import EXAMPLE_URLS, KalshiTennisUrlError, parse_tennis_contract
+from rk_kalshi.kalshi_url import (
+    EXAMPLE_CRYPTO_URLS,
+    EXAMPLE_URLS,
+    KalshiTennisUrlError,
+    KalshiUrlError,
+    parse_contract,
+    parse_crypto_contract,
+    parse_tennis_contract,
+)
 
 
 class KalshiUrlTests(unittest.TestCase):
@@ -71,6 +79,36 @@ class KalshiUrlTests(unittest.TestCase):
             "https://trading.kalshi.com/?event_ticker=kxatpmatch-26sep06medtia"
         )
         self.assertEqual(home.event_ticker, "KXATPMATCH-26SEP06MEDTIA")
+
+    def test_parse_contract_accepts_btc_15m_url(self):
+        parsed = parse_contract(EXAMPLE_CRYPTO_URLS[0])
+        self.assertEqual(parsed.asset_class, "bitcoin")
+        self.assertEqual(parsed.series_ticker, "KXBTC15M")
+        self.assertEqual(parsed.event_ticker, "KXBTC15M-26SEP061845")
+        self.assertIsNone(parsed.market_ticker)
+        market = parse_contract(
+            "https://kalshi.com/markets/kxbtc15m/bitcoin-price-up-down/"
+            "kxbtc15m-26sep061900/kxbtc15m-26sep061900-00"
+        )
+        self.assertEqual(market.market_ticker, "KXBTC15M-26SEP061900-00")
+        self.assertEqual(market.event_ticker, "KXBTC15M-26SEP061900")
+        bare = parse_crypto_contract("KXBTC15M-26SEP061845")
+        self.assertEqual(bare.event_ticker, "KXBTC15M-26SEP061845")
+        daily = parse_contract("KXBTCD-26SEP0601-T70099.99")
+        self.assertEqual(daily.market_ticker, "KXBTCD-26SEP0601-T70099.99")
+        eth = parse_contract("KXETH15M-26SEP061845")
+        self.assertEqual(eth.asset_class, "bitcoin")
+        self.assertEqual(eth.series_ticker, "KXETH15M")
+
+    def test_parse_contract_keeps_tennis_and_rejects_garbage(self):
+        tennis = parse_contract(EXAMPLE_URLS[0])
+        self.assertEqual(tennis.asset_class, "tennis")
+        self.assertEqual(tennis.event_ticker, "KXATPMATCH-26SEP06CERBLO")
+        with self.assertRaises(KalshiUrlError) as ctx:
+            parse_contract("https://example.com/foo")
+        self.assertIn("not a Kalshi link", str(ctx.exception))
+        with self.assertRaises(KalshiUrlError):
+            parse_crypto_contract("https://kalshi.com/markets/kxbtc15m")
 
     def test_rejects_empty_and_garbage(self):
         with self.assertRaises(KalshiTennisUrlError):

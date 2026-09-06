@@ -53,7 +53,8 @@
   let running = false;
   let marketsTimer = null;
   let lastMarkets = null;
-  let lastTarget = { active: false, event_ticker: "", market_ticker: "", label: "" };
+  let lastTarget = { active: false, event_ticker: "", market_ticker: "", label: "", asset_class: "" };
+  let contractError = "";
   const pollMs = 700;
 
   async function fetchJSON(url, options) {
@@ -173,15 +174,16 @@
     const liveOnly = Boolean(els.filterLiveMarkets && els.filterLiveMarkets.checked);
     const showBitcoin = !els.filterBitcoinMarkets || els.filterBitcoinMarkets.checked;
     const rows = all.filter((m) => {
-      if (m.asset_class === "bitcoin") {
-        return showBitcoin;
-      }
       if (lastTarget.active) {
         const eventKey = String(lastTarget.event_ticker || "").toUpperCase();
         const marketKey = String(lastTarget.market_ticker || "").toUpperCase();
-        if (marketKey) return String(m.ticker || "").toUpperCase() === marketKey;
-        return String(m.event_ticker || m.match_id || "").toUpperCase() === eventKey;
+        const matches = marketKey
+          ? String(m.ticker || "").toUpperCase() === marketKey
+          : String(m.event_ticker || m.match_id || "").toUpperCase() === eventKey;
+        if (m.asset_class === "bitcoin") return showBitcoin && matches;
+        return matches;
       }
+      if (m.asset_class === "bitcoin") return showBitcoin;
       if (liveOnly) return Boolean(m.in_play);
       return true;
     });
@@ -293,7 +295,7 @@
     const books = [
       status.trade_bitcoin ? "Bitcoin buy+sell" : null,
       lastTarget.active
-        ? `tennis ${lastTarget.label || lastTarget.event_ticker}`
+        ? `${lastTarget.asset_class === "bitcoin" ? "btc" : "tennis"} ${lastTarget.label || lastTarget.event_ticker}`
         : (status.trade_tennis ? (status.live_matches_only ? "live tennis" : "all tennis") : null),
     ].filter(Boolean).join(" · ") || "no books selected";
     els.startHint.textContent = running
@@ -308,18 +310,14 @@
       market_ticker: (target && target.market_ticker) || "",
       label: (target && target.label) || "",
       url: (target && target.url) || "",
+      asset_class: (target && target.asset_class) || "",
     };
-    if (els.contractStatus) {
-      if (!lastTarget.active) {
-        els.contractStatus.textContent = "No match selected — tennis can scan the full universe.";
-      } else if (lastTarget.market_ticker) {
-        els.contractStatus.textContent =
-          `Selected contract ${lastTarget.market_ticker} on ${lastTarget.event_ticker}. Paper tennis will use only this market.`;
-      } else {
-        els.contractStatus.textContent =
-          `Selected match ${lastTarget.label || lastTarget.event_ticker}. Paper tennis will use only this match’s contracts.`;
-      }
+    if (target && target.error) {
+      contractError = String(target.error);
+    } else if (target && target.active) {
+      contractError = "";
     }
+    paintContractStatus();
     if (els.contractSelect && lastTarget.event_ticker) {
       const exists = Array.from(els.contractSelect.options).some((opt) => opt.value === lastTarget.event_ticker);
       if (!exists) {
@@ -338,18 +336,39 @@
     if (lastMarkets) renderMarkets(lastMarkets);
   }
 
+  function paintContractStatus() {
+    if (!els.contractStatus) return;
+    if (contractError) {
+      els.contractStatus.textContent = contractError;
+      els.contractStatus.classList.add("error");
+      return;
+    }
+    els.contractStatus.classList.remove("error");
+    if (!lastTarget.active) {
+      els.contractStatus.textContent = "No contract selected — paper can scan the full enabled universe.";
+    } else if (lastTarget.market_ticker) {
+      const kind = lastTarget.asset_class === "bitcoin" ? "Bitcoin" : "tennis";
+      els.contractStatus.textContent =
+        `Selected ${kind} contract ${lastTarget.market_ticker} on ${lastTarget.event_ticker}. Paper trading will use only this market.`;
+    } else {
+      const kind = lastTarget.asset_class === "bitcoin" ? "Bitcoin event" : "tennis match";
+      els.contractStatus.textContent =
+        `Selected ${kind} ${lastTarget.label || lastTarget.event_ticker}. Paper trading will use only this event’s contracts.`;
+    }
+  }
+
   function populateContractSelect(payload) {
     if (!els.contractSelect) return;
     const selected = els.contractSelect.value;
     const seen = new Map();
     for (const market of payload.markets || []) {
-      if (market.asset_class && market.asset_class !== "tennis") continue;
       const eventTicker = market.event_ticker || market.match_id;
       if (!eventTicker || seen.has(eventTicker)) continue;
-      seen.set(eventTicker, market.event_name || eventTicker);
+      const kind = market.asset_class === "bitcoin" ? "BTC" : "tennis";
+      seen.set(eventTicker, `${kind} · ${market.event_name || eventTicker}`);
     }
     const current = lastTarget.event_ticker || selected;
-    els.contractSelect.innerHTML = '<option value="">All open tennis (no specific match)</option>';
+    els.contractSelect.innerHTML = '<option value="">All enabled books (no specific contract)</option>';
     for (const [ticker, name] of [...seen.entries()].sort((a, b) => a[1].localeCompare(b[1]))) {
       const opt = document.createElement("option");
       opt.value = ticker;
@@ -456,6 +475,8 @@
       if (payload.run) renderRun(payload.run);
     } catch (err) {
       els.log.textContent = `error: ${err.message}`;
+      contractError = err.message;
+      paintContractStatus();
       setRunEnabled(true);
     }
   }
@@ -490,6 +511,7 @@
   async function useContract() {
     const url = (els.contractUrl && els.contractUrl.value.trim()) || "";
     const eventTicker = (els.contractSelect && els.contractSelect.value) || "";
+    contractError = "";
     try {
       const payload = await fetchJSON("/api/contract", {
         method: "POST",
@@ -498,11 +520,13 @@
       });
       renderTarget(payload.target || {});
     } catch (err) {
-      if (els.contractStatus) els.contractStatus.textContent = err.message;
+      contractError = err.message;
+      paintContractStatus();
     }
   }
 
   async function clearContract() {
+    contractError = "";
     try {
       const payload = await fetchJSON("/api/contract", {
         method: "POST",
@@ -512,12 +536,14 @@
       if (els.contractUrl) els.contractUrl.value = "";
       renderTarget(payload.target || {});
     } catch (err) {
-      if (els.contractStatus) els.contractStatus.textContent = err.message;
+      contractError = err.message;
+      paintContractStatus();
     }
   }
 
   async function clearSession() {
     if (els.btnClearSession) els.btnClearSession.disabled = true;
+    contractError = "";
     try {
       const payload = await fetchJSON("/api/clear", { method: "POST" });
       if (els.contractUrl) els.contractUrl.value = "";

@@ -126,7 +126,10 @@ class DashboardApiTests(unittest.TestCase):
         self.assertIn("Clear logs", response.text)
         self.assertIn("btn-clear-session", response.text)
         self.assertIn("contract-url", response.text)
+        self.assertIn("contract-status", response.text)
         self.assertIn("kalshi.com/markets/kxatpmatch", response.text)
+        self.assertIn("kxbtc15m/bitcoin-price-up-down", response.text)
+        self.assertIn("Contract / match", response.text)
         self.assertIn("not a live Kalshi account", response.text)
 
     def test_health_and_status_lock_paper_mode(self):
@@ -426,6 +429,10 @@ class DashboardApiTests(unittest.TestCase):
         bad = self.http.post("/api/contract", json={"url": "https://example.com/foo"})
         self.assertEqual(bad.status_code, 400)
         self.assertIn("not a Kalshi link", bad.json()["detail"])
+        after_bad = self.http.get("/api/status").json()["target"]
+        self.assertFalse(after_bad["active"])
+        self.assertIn("not a Kalshi link", after_bad["error"])
+        self.assertNotEqual(after_bad["error"], "")
 
         series = self.http.post(
             "/api/contract",
@@ -436,9 +443,14 @@ class DashboardApiTests(unittest.TestCase):
 
         crypto = self.http.post(
             "/api/contract",
-            json={"url": "https://kalshi.com/markets/kxbtc15m/bitcoin/kxbtc15m-26sep060015"},
+            json={
+                "url": "https://kalshi.com/markets/kxbtc15m/bitcoin-price-up-down/kxbtc15m-26sep061845"
+            },
         )
-        self.assertEqual(crypto.status_code, 400)
+        self.assertEqual(crypto.status_code, 200)
+        self.assertEqual(crypto.json()["target"]["event_ticker"], "KXBTC15M-26SEP061845")
+        self.assertEqual(crypto.json()["target"]["asset_class"], "bitcoin")
+        self.assertEqual(crypto.json()["target"]["error"], "")
 
         ok = self.http.post(
             "/api/contract",
