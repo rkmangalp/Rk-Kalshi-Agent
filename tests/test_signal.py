@@ -52,6 +52,40 @@ class SignalEngineTests(unittest.TestCase):
         self.assertGreaterEqual(signal.edge_cents, 3.0)
         self.assertIn("SELL YES", signal.edge_thesis)
 
+    def test_bitcoin_buy_and_sell_yes(self):
+        buy_mkt = _market(
+            ticker="KXBTC15M-26SEP060015-15",
+            event_ticker="KXBTC15M-26SEP060015",
+            event_name="BTC 15 min",
+            title="Up",
+            series_ticker="KXBTC15M",
+            yes_bid=0.395,
+            yes_ask=0.405,
+            last_price=0.40,
+        )
+        self.engine.load_ema({buy_mkt.ticker: 0.60})
+        buy = self.engine.evaluate_one(buy_mkt, now=1_000_000.0)
+        self.assertIsNotNone(buy)
+        self.assertEqual(buy.side, "buy")
+        self.assertIn("BUY YES", buy.edge_thesis)
+        self.assertIn("bitcoin", buy.edge_thesis.lower())
+
+        sell_mkt = _market(
+            ticker="KXBTC15M-26SEP060030-15",
+            event_ticker="KXBTC15M-26SEP060030",
+            event_name="BTC 15 min",
+            title="Up",
+            series_ticker="KXBTC15M",
+            yes_bid=0.595,
+            yes_ask=0.605,
+            last_price=0.60,
+        )
+        self.engine.load_ema({sell_mkt.ticker: 0.40})
+        sell = self.engine.evaluate_one(sell_mkt, now=1_000_000.0)
+        self.assertIsNotNone(sell)
+        self.assertEqual(sell.side, "sell")
+        self.assertIn("SELL YES", sell.edge_thesis)
+
     def test_no_signal_when_last_equals_mid(self):
         market = _market(yes_bid=0.50, yes_ask=0.50, last_price=0.50)
         self.assertIsNone(self.engine.evaluate_one(market, now=1_000_000.0))

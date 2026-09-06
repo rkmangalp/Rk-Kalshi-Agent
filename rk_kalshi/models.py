@@ -48,6 +48,10 @@ class MarketSnapshot:
         return self.event_ticker
 
     @property
+    def asset_class(self) -> str:
+        return asset_class_for_series(self.series_ticker or self.ticker)
+
+    @property
     def yes_mid(self) -> Optional[float]:
         if self.yes_bid <= 0 or self.yes_ask <= 0:
             return None
@@ -186,6 +190,32 @@ class PaperState:
 
     def daily_pnl(self, marks: dict[str, float] | None = None) -> float:
         return self.mtm_equity(marks) - self.start_of_day_equity
+
+
+def asset_class_for_series(series: str) -> str:
+    text = (series or "").upper()
+    prefix = text.split("-", 1)[0]
+    if prefix.startswith("KXBTC") or prefix.startswith("KXETH"):
+        return "bitcoin"
+    if prefix.startswith(("KXATP", "KXWTA", "KXITF")):
+        return "tennis"
+    return "other"
+
+
+def select_bitcoin_tradeable(
+    markets: list[MarketSnapshot],
+    near_money_low: float = 0.15,
+    near_money_high: float = 0.85,
+) -> list[MarketSnapshot]:
+    """Keep 15-minute BTC books plus near-the-money above/below strikes."""
+    kept: list[MarketSnapshot] = []
+    for market in markets:
+        if market.asset_class != "bitcoin" or market.yes_mid is None:
+            continue
+        series = (market.series_ticker or market.ticker).upper()
+        if "15M" in series or near_money_low <= market.yes_mid <= near_money_high:
+            kept.append(market)
+    return kept
 
 
 def select_in_play(

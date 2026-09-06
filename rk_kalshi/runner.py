@@ -6,7 +6,7 @@ from rk_kalshi.client import KalshiPublicClient
 from rk_kalshi.config import AppConfig
 from rk_kalshi.execution import PaperExecution
 from rk_kalshi.journal import FillJournal
-from rk_kalshi.models import Fill, Signal, select_in_play
+from rk_kalshi.models import Fill, MarketSnapshot, Signal, select_bitcoin_tradeable, select_in_play
 from rk_kalshi.risk import RiskManager
 from rk_kalshi.signal import TennisSignalEngine
 from rk_kalshi.state import load_state, save_state
@@ -21,7 +21,13 @@ class PaperRunner:
         self.risk = RiskManager(cfg)
         self.paper = PaperExecution(cfg, self.risk)
         self.journal = FillJournal(cfg.fill_log_csv, cfg.fill_log_jsonl)
-        self.last_scan: dict = {"open": 0, "live": 0, "next_event_name": "", "next_start_iso": ""}
+        self.last_scan: dict = {
+            "open": 0,
+            "live": 0,
+            "bitcoin": 0,
+            "next_event_name": "",
+            "next_start_iso": "",
+        }
 
     def close(self) -> None:
         if self.owns_client:
@@ -38,10 +44,16 @@ class PaperRunner:
     def run_once(self) -> list[Fill]:
         state = load_state(self.cfg)
         self.signal.load_ema(state.ema)
-        markets, latency_ms = self.client.list_tennis_markets()
+        markets, latency_ms = self.client.list_markets()
         now = time.time()
-        live, nxt = select_in_play(
+        tennis = [m for m in markets if m.asset_class == "tennis"]
+        bitcoin = select_bitcoin_tradeable(
             markets,
+            near_money_low=self.cfg.bitcoin_near_money_low,
+            near_money_high=self.cfg.bitcoin_near_money_high,
+        )
+        live, nxt = select_in_play(
+            tennis,
             now,
             pre_start_s=max(0.0, self.cfg.live_pre_start_minutes) * 60.0,
             max_duration_s=max(0.1, self.cfg.live_max_hours) * 3600.0,
@@ -49,6 +61,7 @@ class PaperRunner:
         self.last_scan = {
             "open": len(markets),
             "live": len(live),
+            "bitcoin": len(bitcoin),
             "next_event_name": nxt.event_name if nxt else "",
             "next_start_iso": (
                 time.strftime("%Y-%m-%dT%H:%M:%S%z", time.localtime(nxt.occurrence_ts))
@@ -56,7 +69,12 @@ class PaperRunner:
                 else ""
             ),
         }
-        tradeable = live if self.cfg.live_matches_only else markets
+        tennis_tradeable = live if self.cfg.live_matches_only else tennis
+        tradeable: list[MarketSnapshot] = []
+        if self.cfg.trade_tennis:
+            tradeable.extend(tennis_tradeable)
+        if self.cfg.trade_bitcoin:
+            tradeable.extend(bitcoin)
         marks = {m.ticker: m.yes_mid for m in tradeable if m.yes_mid is not None}
         if self.risk.kill_switch_hit(state, marks):
             state.killed = True
