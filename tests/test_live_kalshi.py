@@ -27,6 +27,7 @@ class LiveKalshiTennisTests(unittest.TestCase):
         self.assertTrue(sample.event_ticker)
         self.assertTrue(sample.event_name)
         self.assertEqual(sample.match_id, sample.event_ticker)
+        self.assertIsNotNone(sample.occurrence_ts)
         self.assertGreaterEqual(sample.yes_bid, 0.0)
         self.assertGreaterEqual(sample.yes_ask, 0.0)
 

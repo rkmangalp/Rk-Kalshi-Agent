@@ -58,6 +58,7 @@ def _market() -> MarketSnapshot:
         updated_ts=1_700_000_000.0,
         status="open",
         series_ticker="KXATPMATCH",
+        occurrence_ts=1_700_000_000.0,
     )
 
 
@@ -99,7 +100,7 @@ class DashboardApiTests(unittest.TestCase):
             cycle_sleep_s=15.0,
         )
         self.client = MagicMock()
-        self.client.list_tennis_markets.return_value = ([_market()], 18.5)
+        self.client.list_markets.return_value = ([_market()], 18.5)
         self.app = create_app(self.cfg, client=self.client)
         self.http = _client(self.app)
 
@@ -113,8 +114,16 @@ class DashboardApiTests(unittest.TestCase):
         self.assertIn("no live orders", response.text)
         self.assertNotIn("Place live order", response.text)
         self.assertIn("Start paper trading", response.text)
+        self.assertIn("Live tennis matches only", response.text)
+        self.assertIn("Bitcoin (buy and sell YES)", response.text)
+        self.assertIn("local time", response.text)
+        self.assertIn("fills-time-head", response.text)
+        self.assertIn("app.js?v=", response.text)
+        self.assertIn("no-store", (response.headers.get("cache-control") or "").lower())
         self.assertIn("starting-cash", response.text)
         self.assertIn("btn-stop", response.text)
+        self.assertIn("btn-clear-logs", response.text)
+        self.assertIn("Clear logs", response.text)
 
     def test_health_and_status_lock_paper_mode(self):
         health = self.http.get("/api/health")
@@ -153,7 +162,42 @@ class DashboardApiTests(unittest.TestCase):
         self.assertAlmostEqual(row["last_price"], 0.420)
         self.assertAlmostEqual(row["spread_cents"], 2.0)
         self.assertAlmostEqual(row["volume"], 125.0)
-        self.client.list_tennis_markets.assert_called()
+        self.assertIn("in_play", row)
+        self.assertEqual(row["asset_class"], "tennis")
+        self.client.list_markets.assert_called()
+
+    def test_markets_keeps_near_money_bitcoin_and_drops_lottery_strikes(self):
+        near = MarketSnapshot(
+            ticker="KXBTC15M-26SEP060015-15",
+            event_ticker="KXBTC15M-26SEP060015",
+            event_name="BTC 15 min",
+            title="Up",
+            yes_bid=0.540,
+            yes_ask=0.550,
+            last_price=0.545,
+            volume=80.0,
+            updated_ts=1_700_000_000.0,
+            status="active",
+            series_ticker="KXBTC15M",
+        )
+        far = MarketSnapshot(
+            ticker="KXBTCD-26SEP0601-T70099.99",
+            event_ticker="KXBTCD-26SEP0601",
+            event_name="BTC price",
+            title="Above 70099",
+            yes_bid=0.990,
+            yes_ask=1.000,
+            last_price=0.995,
+            volume=10.0,
+            updated_ts=1_700_000_000.0,
+            status="active",
+            series_ticker="KXBTCD",
+        )
+        self.client.list_markets.return_value = ([near, far], 9.0)
+        response = self.http.get("/api/markets")
+        self.assertEqual(response.status_code, 200)
+        tickers = [row["ticker"] for row in response.json()["markets"]]
+        self.assertEqual(tickers, [near.ticker])
 
     def test_fills_and_pnl_use_locked_schema(self):
         FillJournal(self.cfg.fill_log_csv, self.cfg.fill_log_jsonl).append(_fill())
@@ -166,6 +210,7 @@ class DashboardApiTests(unittest.TestCase):
         row = payload["fills"][0]
         for name in REQUIRED_FIELDS:
             self.assertIn(name, row)
+        self.assertEqual(row["timestamp"], "2026-09-06T02:00:00.000000Z")
         self.assertEqual(row["ticker"], "KXATPMATCH-26SEP06AAA-BBB")
         self.assertEqual(row["match_id"], "KXATPMATCH-26SEP06AAA")
         self.assertFalse(row["can_size_up"])
@@ -188,7 +233,7 @@ class DashboardApiTests(unittest.TestCase):
         state = new_state(self.cfg, day="2026-09-06")
         state.ema["KXATPMATCH-26SEP06AAA-BBB"] = 0.60
         save_state(self.cfg, state)
-        self.client.list_tennis_markets.return_value = (
+        self.client.list_markets.return_value = (
             [
                 MarketSnapshot(
                     ticker="KXATPMATCH-26SEP06AAA-BBB",
@@ -202,6 +247,7 @@ class DashboardApiTests(unittest.TestCase):
                     updated_ts=1_700_000_000.0,
                     status="active",
                     series_ticker="KXATPMATCH",
+                    occurrence_ts=time.time(),
                 )
             ],
             12.0,
@@ -305,6 +351,9 @@ class DashboardApiTests(unittest.TestCase):
         self.assertAlmostEqual(body["session"]["starting_cash"], 80.0)
         self.assertAlmostEqual(body["session"]["max_dollars_per_ticker"], 4.0)
         self.assertFalse(body["session"]["can_size_up"])
+        self.assertTrue(body["session"]["live_matches_only"])
+        self.assertTrue(body["session"]["trade_bitcoin"])
+        self.assertTrue(body["session"]["trade_tennis"])
         self.assertTrue(body["run"]["continuous"])
         self.assertTrue(body["run"]["running"])
 
@@ -341,6 +390,28 @@ class DashboardApiTests(unittest.TestCase):
         self.assertAlmostEqual(status["starting_cash"], 80.0)
         self.assertAlmostEqual(status["max_dollars_per_ticker"], 4.0)
         self.assertFalse(status["can_size_up"])
+        self.assertTrue(status["trade_bitcoin"])
+        self.assertTrue(status["trade_tennis"])
+
+        empty = http.post(
+            "/api/start",
+            json={"starting_cash": 80, "trade_bitcoin": False, "trade_tennis": False},
+        )
+        self.assertEqual(empty.status_code, 400)
+
+    def test_clear_logs_empties_buffer(self):
+        self.http.post("/api/run", json={"cycles": 1, "sleep_s": 0})
+        deadline = time.time() + 4
+        while time.time() < deadline and self.http.get("/api/run").json()["running"]:
+            time.sleep(0.05)
+        before = self.http.get("/api/run").json()["logs"]
+        self.assertGreater(len(before), 0)
+        cleared = self.http.post("/api/logs/clear")
+        self.assertEqual(cleared.status_code, 200)
+        logs = cleared.json()["logs"]
+        self.assertEqual(len(logs), 1)
+        self.assertIn("logs cleared", logs[0])
+        self.assertFalse(any("PAPER MODE ONLY" in line for line in logs))
 
 
 if __name__ == "__main__":

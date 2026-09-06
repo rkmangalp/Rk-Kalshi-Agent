@@ -6,7 +6,7 @@ from rk_kalshi.config import AppConfig
 from rk_kalshi.fees import quadratic_fee_dollars
 from rk_kalshi.models import Fill, PaperState, Signal
 from rk_kalshi.risk import RiskManager
-from rk_kalshi.state import apply_fill, utc_now_iso
+from rk_kalshi.state import apply_fill, local_now_iso
 
 
 class LiveTradingDisabledError(RuntimeError):
@@ -51,7 +51,7 @@ class PaperExecution:
             state.killed = True
             state.kill_reason = state.kill_reason or "daily loss kill-switch"
         return Fill(
-            timestamp=utc_now_iso(),
+            timestamp=local_now_iso(),
             ticker=signal.ticker,
             side=signal.side,
             fill_price=signal.fill_price,

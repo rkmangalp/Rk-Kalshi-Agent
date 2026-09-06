@@ -78,8 +78,10 @@ Optional: `python3 -m pip install -e .` then `rk-kalshi list-tennis-markets`.
 ## Dashboard (Windows)
 
 The dashboard is a local FastAPI app: a **Start** page sets paper bankroll
-(default $100), max $ per trade, and daily loss, then polls tennis markets
-until **Stop**. It **cannot** place live orders. `can_size_up` stays locked.
+(default $100), max $ per trade, and daily loss, then polls **live (in-play)
+tennis matches** until **Stop**. Upcoming books are shown but not paper-traded
+while “Live matches only” is on. It **cannot** place live orders.
+`can_size_up` stays locked.
 Chosen amounts are written to `data/dashboard_session.json` and
 `config.yaml` so the next paper-run uses them. Default bind is
 `127.0.0.1:8765`.

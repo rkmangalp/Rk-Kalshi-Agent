@@ -24,11 +24,11 @@ from pydantic import BaseModel, Field, model_validator
 from rk_kalshi.client import KalshiPublicClient
 from rk_kalshi.config import AppConfig, load_config
 from rk_kalshi.journal import read_fills, summarize_pnl
-from rk_kalshi.models import MarketSnapshot
+from rk_kalshi.models import MarketSnapshot, select_bitcoin_tradeable
 from rk_kalshi.risk import RiskManager
 from rk_kalshi.runner import PaperRunner
 from rk_kalshi.schema import FILL_FIELDS
-from rk_kalshi.state import load_state, new_state, save_state, utc_now_iso
+from rk_kalshi.state import load_state, local_now_iso, new_state, save_state
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 DEFAULT_HOST = "127.0.0.1"
@@ -76,6 +76,9 @@ class StartRequest(BaseModel):
     sleep_s: float | None = Field(default=None, ge=0.0, le=MAX_SLEEP_S)
     continuous: bool = True
     cycles: int | None = Field(default=None, ge=1, le=MAX_CYCLES)
+    live_matches_only: bool = True
+    trade_bitcoin: bool = True
+    trade_tennis: bool = True
     live: bool | None = None
     mode: str | None = None
 
@@ -136,7 +139,7 @@ class RunController:
             self.cycles_total = 0 if continuous else cycles
             self.fills_this_run = 0
             self.last_error = None
-            self.started_at = utc_now_iso()
+            self.started_at = local_now_iso()
             self.finished_at = None
             self.logs.clear()
             self._stop.clear()
@@ -158,8 +161,15 @@ class RunController:
         self._log("stop requested — finishing current cycle (paper mode)")
         return self.snapshot()
 
+    def clear_logs(self) -> dict[str, Any]:
+        with self._lock:
+            self.logs.clear()
+            self.last_error = None
+        self._log("logs cleared")
+        return self.snapshot()
+
     def _log(self, message: str) -> None:
-        line = f"{utc_now_iso()}  {message}"
+        line = f"{local_now_iso()}  {message}"
         with self._lock:
             self.logs.append(line)
 
@@ -173,8 +183,8 @@ class RunController:
         try:
             if continuous:
                 self._log(
-                    "PAPER MODE ONLY — Start: polling tennis markets until Stop; "
-                    "live orders disabled; can_size_up stays locked"
+                    "PAPER MODE ONLY — Start: polling Bitcoin (buy+sell YES) and "
+                    "tennis until Stop; live orders disabled; can_size_up stays locked"
                 )
             else:
                 self._log(
@@ -186,8 +196,24 @@ class RunController:
                 if not continuous and index >= cycles:
                     break
                 label = f"{index + 1}" if continuous else f"{index + 1}/{cycles}"
-                self._log(f"cycle {label}: scanning open tennis markets")
+                self._log(f"cycle {label}: scanning Bitcoin and tennis markets")
                 fills = self.runner.run_once()
+                scan = getattr(self.runner, "last_scan", None) or {}
+                if scan:
+                    self._log(
+                        f"  btc {scan.get('bitcoin', 0)} / live tennis {scan.get('live', 0)} "
+                        f"/ open {scan.get('open', 0)} "
+                        f"(live-matches-only={self.cfg.live_matches_only} "
+                        f"btc={self.cfg.trade_bitcoin} tennis={self.cfg.trade_tennis})"
+                    )
+                    if (
+                        self.cfg.trade_tennis
+                        and self.cfg.live_matches_only
+                        and not scan.get("live")
+                    ):
+                        nxt = scan.get("next_event_name") or "none scheduled"
+                        when = scan.get("next_start_iso") or "n/a"
+                        self._log(f"  no in-play tennis — next: {nxt} at {when}")
                 with self._lock:
                     self.cycles_done = index + 1
                     self.fills_this_run += len(fills)
@@ -228,7 +254,7 @@ class RunController:
             with self._lock:
                 self.running = False
                 self.stopping = False
-                self.finished_at = utc_now_iso()
+                self.finished_at = local_now_iso()
 
 
 class DashboardService:
@@ -269,6 +295,9 @@ class DashboardService:
         max_dollars_per_ticker: float,
         daily_loss_limit: float,
         cycle_sleep_s: float | None = None,
+        live_matches_only: bool = True,
+        trade_bitcoin: bool = True,
+        trade_tennis: bool = True,
     ) -> dict[str, Any]:
         sleep_s = self.cfg.cycle_sleep_s if cycle_sleep_s is None else cycle_sleep_s
         cfg = replace(
@@ -277,6 +306,9 @@ class DashboardService:
             max_dollars_per_ticker=float(max_dollars_per_ticker),
             daily_loss_limit=float(daily_loss_limit),
             cycle_sleep_s=float(sleep_s),
+            live_matches_only=bool(live_matches_only),
+            trade_bitcoin=bool(trade_bitcoin),
+            trade_tennis=bool(trade_tennis),
             live_enabled=False,
         )
         self.bind_config(cfg)
@@ -289,6 +321,9 @@ class DashboardService:
             "max_dollars_per_ticker": cfg.max_dollars_per_ticker,
             "daily_loss_limit": cfg.daily_loss_limit,
             "cycle_sleep_s": cfg.cycle_sleep_s,
+            "live_matches_only": cfg.live_matches_only,
+            "trade_bitcoin": cfg.trade_bitcoin,
+            "trade_tennis": cfg.trade_tennis,
             "can_size_up": False,
             "allow_size_up": cfg.allow_size_up,
             "state": applied,
@@ -321,6 +356,9 @@ def _cfg_from_session(cfg: AppConfig) -> AppConfig:
         max_dollars_per_ticker=float(raw.get("max_dollars_per_ticker", cfg.max_dollars_per_ticker)),
         daily_loss_limit=float(raw.get("daily_loss_limit", cfg.daily_loss_limit)),
         cycle_sleep_s=float(raw.get("cycle_sleep_s", cfg.cycle_sleep_s)),
+        live_matches_only=bool(raw.get("live_matches_only", cfg.live_matches_only)),
+        trade_bitcoin=bool(raw.get("trade_bitcoin", cfg.trade_bitcoin)),
+        trade_tennis=bool(raw.get("trade_tennis", cfg.trade_tennis)),
         live_enabled=False,
     )
 
@@ -331,6 +369,9 @@ def _persist_session(cfg: AppConfig, config_path: Path | None) -> dict[str, bool
         "max_dollars_per_ticker": cfg.max_dollars_per_ticker,
         "daily_loss_limit": cfg.daily_loss_limit,
         "cycle_sleep_s": cfg.cycle_sleep_s,
+        "live_matches_only": cfg.live_matches_only,
+        "trade_bitcoin": cfg.trade_bitcoin,
+        "trade_tennis": cfg.trade_tennis,
         "paper_mode": True,
         "live_enabled": False,
     }
@@ -419,6 +460,9 @@ def _market_payload(market: MarketSnapshot) -> dict[str, Any]:
         "volume": market.volume,
         "status": market.status,
         "series_ticker": market.series_ticker,
+        "occurrence_ts": market.occurrence_ts,
+        "in_play": market.is_in_play(time.time()),
+        "asset_class": market.asset_class,
     }
 
 
@@ -464,8 +508,12 @@ def _status_payload(service: DashboardService) -> dict[str, Any]:
         "max_dollars_per_ticker": service.cfg.max_dollars_per_ticker,
         "daily_loss_limit": service.cfg.daily_loss_limit,
         "cycle_sleep_s": service.cfg.cycle_sleep_s,
-        "series_tickers": list(service.cfg.series_tickers),
+        "series_tickers": list(service.cfg.enabled_series_tickers()),
         "edge_threshold_cents": service.cfg.edge_threshold_cents,
+        "live_matches_only": service.cfg.live_matches_only,
+        "trade_bitcoin": service.cfg.trade_bitcoin,
+        "trade_tennis": service.cfg.trade_tennis,
+        "bitcoin_series_tickers": list(service.cfg.bitcoin_series_tickers),
         "run": service.controller.snapshot(),
     }
 
@@ -506,7 +554,13 @@ def create_app(
         page = STATIC_DIR / "index.html"
         if not page.exists():
             raise HTTPException(500, "dashboard static files are missing")
-        return FileResponse(page)
+        return FileResponse(
+            page,
+            headers={
+                "Cache-Control": "no-store, max-age=0",
+                "Pragma": "no-cache",
+            },
+        )
 
     @app.get("/api/health")
     def health() -> dict[str, Any]:
@@ -519,15 +573,21 @@ def create_app(
     @app.get("/api/markets")
     def markets() -> dict[str, Any]:
         try:
-            snapshots, latency_ms = service.client.list_tennis_markets()
+            snapshots, latency_ms = service.client.list_markets()
         except Exception as exc:  # noqa: BLE001 — HTTP client / parse errors
             raise HTTPException(status_code=502, detail=f"Kalshi public API error: {exc}") from exc
-        payload = [_market_payload(m) for m in snapshots]
-        payload.sort(key=lambda row: (row["event_name"], row["ticker"]))
+        tennis = [m for m in snapshots if m.asset_class != "bitcoin"]
+        bitcoin = select_bitcoin_tradeable(
+            snapshots,
+            near_money_low=service.cfg.bitcoin_near_money_low,
+            near_money_high=service.cfg.bitcoin_near_money_high,
+        )
+        payload = [_market_payload(m) for m in tennis + bitcoin]
+        payload.sort(key=lambda row: (0 if row["asset_class"] == "bitcoin" else 1, row["event_name"], row["ticker"]))
         return {
             "count": len(payload),
             "latency_ms": round(float(latency_ms), 3),
-            "series": list(service.cfg.series_tickers),
+            "series": list(service.cfg.enabled_series_tickers()),
             "paper_mode": True,
             "markets": payload,
         }
@@ -563,11 +623,16 @@ def create_app(
     def start_session(body: StartRequest) -> dict[str, Any]:
         if service.controller.snapshot()["running"]:
             raise HTTPException(status_code=409, detail="paper-run already in progress")
+        if not body.trade_bitcoin and not body.trade_tennis:
+            raise HTTPException(status_code=400, detail="select Bitcoin and/or tennis")
         session = service.apply_session(
             starting_cash=body.starting_cash,
             max_dollars_per_ticker=body.max_dollars_per_ticker,
             daily_loss_limit=body.daily_loss_limit,
             cycle_sleep_s=body.sleep_s,
+            live_matches_only=body.live_matches_only,
+            trade_bitcoin=body.trade_bitcoin,
+            trade_tennis=body.trade_tennis,
         )
         continuous = bool(body.continuous) or body.cycles is None
         cycles = 1 if continuous else int(body.cycles or 1)
@@ -580,6 +645,10 @@ def create_app(
     @app.post("/api/stop")
     def stop_session() -> dict[str, Any]:
         return service.controller.stop()
+
+    @app.post("/api/logs/clear")
+    def clear_logs() -> dict[str, Any]:
+        return service.controller.clear_logs()
 
     return app
 

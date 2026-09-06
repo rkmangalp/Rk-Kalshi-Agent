@@ -1,4 +1,4 @@
-# Paper-trading config for Kalshi tennis markets.
+# Paper-trading config for Kalshi tennis and Bitcoin markets.
 # Live order submission stays disabled. Do not size up until paper P&L
 # is positive on a large sample (see sizing.min_fills_before_size_up).
 
@@ -9,6 +9,15 @@ kalshi:
     - KXATPMATCH
     - KXWTAMATCH
     - KXITFWMATCH
+  bitcoin_series_tickers:
+    - KXBTC15M
+    - KXBTCD
+  trade_tennis: true
+  trade_bitcoin: true
+  # Above/below strike ladder: keep contracts near 50¢. 15-minute
+  # up/down books are always included (buy YES and sell YES).
+  bitcoin_near_money_low: 0.15
+  bitcoin_near_money_high: 0.85
   request_timeout_s: 15.0
   page_limit: 200
 
@@ -41,6 +50,10 @@ signal:
   max_spread_cents: 8.0
   stale_mid_seconds: 180
   min_volume: 0.0
+  # Paper-trade only matches that have started (Kalshi occurrence_datetime).
+  live_matches_only: true
+  live_pre_start_minutes: 10
+  live_max_hours: 12
 
 paper:
   fill_log_csv: data/fills.csv

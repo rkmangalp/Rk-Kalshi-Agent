@@ -3,8 +3,9 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Cache-Control" content="no-store">
   <title>Rk Kalshi Paper Desk</title>
-  <link rel="stylesheet" href="/static/app.css">
+  <link rel="stylesheet" href="/static/app.css?v=localtime2">
 </head>
 <body>
   <div class="banner" role="status">
@@ -14,7 +15,7 @@
   <header class="top">
     <div>
       <p class="eyebrow">Rk-Kalshi-Agent</p>
-      <h1>Tennis paper desk</h1>
+      <h1>Paper desk</h1>
     </div>
     <div class="top-meta">
       <span class="pill lock" id="size-pill">can_size_up locked</span>
@@ -27,8 +28,10 @@
       <p class="eyebrow">Paper session</p>
       <h2>Start paper trading</h2>
       <p class="lede">
-        Set a paper bankroll, then Start. This is simulated cash only — the UI
-        cannot place live Kalshi orders. <code>can_size_up</code> stays locked.
+        Set a paper bankroll, then Start. Paper-trades Kalshi
+        <strong>Bitcoin buy and sell</strong> (YES contracts) and optional
+        live tennis. This is simulated cash — the UI cannot place live
+        Kalshi or exchange orders. <code>can_size_up</code> stays locked.
       </p>
     </div>
     <form id="start-form" class="start-form">
@@ -47,6 +50,18 @@
       <label>
         Poll interval (s)
         <input id="start-sleep" name="sleep_s" type="number" min="0" max="3600" step="0.5" value="15">
+      </label>
+      <label class="inline live-toggle">
+        <input type="checkbox" id="trade-bitcoin" checked>
+        Bitcoin (buy and sell YES)
+      </label>
+      <label class="inline live-toggle">
+        <input type="checkbox" id="trade-tennis" checked>
+        Tennis
+      </label>
+      <label class="inline live-toggle">
+        <input type="checkbox" id="live-matches-only" checked>
+        Live tennis matches only (in-play)
       </label>
       <div class="start-actions">
         <button type="button" id="btn-start" class="primary start-btn">Start</button>
@@ -110,7 +125,10 @@
     <article class="panel log-panel">
       <div class="panel-head">
         <h2>Live log</h2>
-        <span class="muted" id="log-count">0 lines</span>
+        <div class="toolbar">
+          <span class="muted" id="log-count">0 lines</span>
+          <button type="button" id="btn-clear-logs">Clear logs</button>
+        </div>
       </div>
       <pre id="log" class="log" aria-live="polite">Waiting for a paper-run…</pre>
     </article>
@@ -118,8 +136,16 @@
 
   <section class="panel">
     <div class="panel-head">
-      <h2>Open tennis markets</h2>
+      <h2>Open markets</h2>
       <div class="toolbar">
+        <label class="inline">
+          <input type="checkbox" id="filter-bitcoin-markets" checked>
+          Bitcoin
+        </label>
+        <label class="inline">
+          <input type="checkbox" id="filter-live-markets" checked>
+          Live tennis
+        </label>
         <label class="inline">
           <input type="checkbox" id="auto-markets">
           Auto-refresh
@@ -132,6 +158,8 @@
       <table id="markets-table">
         <thead>
           <tr>
+            <th>Live</th>
+            <th>Asset</th>
             <th>Ticker</th>
             <th>Match / event</th>
             <th class="num">Bid</th>
@@ -143,7 +171,7 @@
           </tr>
         </thead>
         <tbody id="markets-body">
-          <tr><td colspan="8" class="empty">Loading markets…</td></tr>
+          <tr><td colspan="10" class="empty">Loading markets…</td></tr>
         </tbody>
       </table>
     </div>
@@ -152,13 +180,13 @@
   <section class="panel">
     <div class="panel-head">
       <h2>Paper fills</h2>
-      <span class="muted" id="fills-meta">locked schema · newest first</span>
+      <span class="muted" id="fills-meta">local clock · newest first</span>
     </div>
     <div class="table-wrap">
       <table id="fills-table">
         <thead>
           <tr>
-            <th>timestamp</th>
+            <th id="fills-time-head">local time</th>
             <th>ticker</th>
             <th>side</th>
             <th class="num">fill_price</th>
@@ -182,6 +210,6 @@
     <span id="footer-meta">localhost · paper_mode=true · live.enabled cannot be turned on from this UI</span>
   </footer>
 
-  <script src="/static/app.js"></script>
+  <script src="/static/app.js?v=localtime2"></script>
 </body>
 </html>

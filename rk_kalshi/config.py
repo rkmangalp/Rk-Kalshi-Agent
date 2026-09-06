@@ -8,6 +8,7 @@ import yaml
 
 
 DEFAULT_SERIES = ("KXATPMATCH", "KXWTAMATCH", "KXITFWMATCH")
+DEFAULT_BITCOIN_SERIES = ("KXBTC15M", "KXBTCD")
 DEFAULT_BASE_URL = "https://external-api.kalshi.com/trade-api/v2"
 
 
@@ -15,6 +16,11 @@ DEFAULT_BASE_URL = "https://external-api.kalshi.com/trade-api/v2"
 class AppConfig:
     base_url: str = DEFAULT_BASE_URL
     series_tickers: tuple[str, ...] = DEFAULT_SERIES
+    bitcoin_series_tickers: tuple[str, ...] = DEFAULT_BITCOIN_SERIES
+    trade_tennis: bool = True
+    trade_bitcoin: bool = True
+    bitcoin_near_money_low: float = 0.15
+    bitcoin_near_money_high: float = 0.85
     request_timeout_s: float = 15.0
     page_limit: int = 200
     starting_cash: float = 100.0
@@ -33,12 +39,30 @@ class AppConfig:
     max_spread_cents: float = 8.0
     stale_mid_seconds: float = 180.0
     min_volume: float = 0.0
+    live_matches_only: bool = True
+    live_pre_start_minutes: float = 10.0
+    live_max_hours: float = 12.0
     fill_log_csv: Path = Path("data/fills.csv")
     fill_log_jsonl: Path = Path("data/fills.jsonl")
     state_path: Path = Path("data/paper_state.json")
     cycle_sleep_s: float = 15.0
     max_signals_per_cycle: int = 8
     live_enabled: bool = False
+
+    def enabled_series_tickers(self) -> tuple[str, ...]:
+        ordered: list[str] = []
+        if self.trade_tennis:
+            ordered.extend(self.series_tickers)
+        if self.trade_bitcoin:
+            ordered.extend(self.bitcoin_series_tickers)
+        seen: set[str] = set()
+        unique: list[str] = []
+        for ticker in ordered:
+            if ticker in seen:
+                continue
+            seen.add(ticker)
+            unique.append(ticker)
+        return tuple(unique)
 
 
 def load_config(path: str | Path | None = None) -> AppConfig:
@@ -58,9 +82,15 @@ def config_from_mapping(raw: dict[str, Any]) -> AppConfig:
     live = raw.get("live") or {}
 
     series = kalshi.get("series_tickers") or list(DEFAULT_SERIES)
+    bitcoin_series = kalshi.get("bitcoin_series_tickers") or list(DEFAULT_BITCOIN_SERIES)
     return AppConfig(
         base_url=str(kalshi.get("base_url") or DEFAULT_BASE_URL),
         series_tickers=tuple(str(s) for s in series),
+        bitcoin_series_tickers=tuple(str(s) for s in bitcoin_series),
+        trade_tennis=bool(kalshi.get("trade_tennis", True)),
+        trade_bitcoin=bool(kalshi.get("trade_bitcoin", True)),
+        bitcoin_near_money_low=float(kalshi.get("bitcoin_near_money_low", 0.15)),
+        bitcoin_near_money_high=float(kalshi.get("bitcoin_near_money_high", 0.85)),
         request_timeout_s=float(kalshi.get("request_timeout_s", 15.0)),
         page_limit=int(kalshi.get("page_limit", 200)),
         starting_cash=float(bankroll.get("starting_cash", 100.0)),
@@ -79,6 +109,9 @@ def config_from_mapping(raw: dict[str, Any]) -> AppConfig:
         max_spread_cents=float(signal.get("max_spread_cents", 8.0)),
         stale_mid_seconds=float(signal.get("stale_mid_seconds", 180.0)),
         min_volume=float(signal.get("min_volume", 0.0)),
+        live_matches_only=bool(signal.get("live_matches_only", True)),
+        live_pre_start_minutes=float(signal.get("live_pre_start_minutes", 10.0)),
+        live_max_hours=float(signal.get("live_max_hours", 12.0)),
         fill_log_csv=Path(paper.get("fill_log_csv", "data/fills.csv")),
         fill_log_jsonl=Path(paper.get("fill_log_jsonl", "data/fills.jsonl")),
         state_path=Path(paper.get("state_path", "data/paper_state.json")),

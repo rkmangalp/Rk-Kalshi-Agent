@@ -16,6 +16,11 @@ def utc_now_iso() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
 
 
+def local_now_iso() -> str:
+    """Machine-local wall clock with offset, e.g. 2026-09-06T20:31:45.123456-07:00."""
+    return datetime.now().astimezone().isoformat(timespec="microseconds")
+
+
 def new_state(cfg: AppConfig, day: str | None = None) -> PaperState:
     day = day or utc_today()
     return PaperState(

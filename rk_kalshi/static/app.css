@@ -144,6 +144,23 @@ h1 {
 }
 
 .start-form .fine { grid-column: 1 / -1; }
+.live-toggle { grid-column: 1 / -1; }
+.live-dot, .btc-dot {
+  display: inline-block;
+  padding: 0.1rem 0.4rem;
+  border-radius: 999px;
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+}
+.live-dot {
+  background: #5a2c28;
+  color: #ffb3ab;
+}
+.btc-dot {
+  background: #3a3420;
+  color: var(--amber);
+}
 
 .summary {
   display: grid;
@@ -311,6 +328,11 @@ th {
 td { font-variant-numeric: tabular-nums; }
 .num { text-align: right; font-family: var(--mono); }
 .ticker { font-family: var(--mono); font-size: 0.74rem; }
+.when {
+  font-family: var(--mono);
+  font-size: 0.74rem;
+  white-space: nowrap;
+}
 .empty { color: var(--muted); text-align: center; }
 .error { color: var(--red); }
 

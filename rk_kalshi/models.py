@@ -30,10 +30,26 @@ class MarketSnapshot:
     updated_ts: Optional[float]
     status: str = "open"
     series_ticker: str = ""
+    occurrence_ts: Optional[float] = None
+
+    def is_in_play(
+        self,
+        now: float,
+        pre_start_s: float = 600.0,
+        max_duration_s: float = 12 * 3600.0,
+    ) -> bool:
+        """True when the scheduled start is near/now and the match window has not expired."""
+        if self.occurrence_ts is None:
+            return False
+        return (self.occurrence_ts - pre_start_s) <= now <= (self.occurrence_ts + max_duration_s)
 
     @property
     def match_id(self) -> str:
         return self.event_ticker
+
+    @property
+    def asset_class(self) -> str:
+        return asset_class_for_series(self.series_ticker or self.ticker)
 
     @property
     def yes_mid(self) -> Optional[float]:
@@ -174,6 +190,54 @@ class PaperState:
 
     def daily_pnl(self, marks: dict[str, float] | None = None) -> float:
         return self.mtm_equity(marks) - self.start_of_day_equity
+
+
+def asset_class_for_series(series: str) -> str:
+    text = (series or "").upper()
+    prefix = text.split("-", 1)[0]
+    if prefix.startswith("KXBTC") or prefix.startswith("KXETH"):
+        return "bitcoin"
+    if prefix.startswith(("KXATP", "KXWTA", "KXITF")):
+        return "tennis"
+    return "other"
+
+
+def select_bitcoin_tradeable(
+    markets: list[MarketSnapshot],
+    near_money_low: float = 0.15,
+    near_money_high: float = 0.85,
+) -> list[MarketSnapshot]:
+    """Keep 15-minute BTC books plus near-the-money above/below strikes."""
+    kept: list[MarketSnapshot] = []
+    for market in markets:
+        if market.asset_class != "bitcoin" or market.yes_mid is None:
+            continue
+        series = (market.series_ticker or market.ticker).upper()
+        if "15M" in series or near_money_low <= market.yes_mid <= near_money_high:
+            kept.append(market)
+    return kept
+
+
+def select_in_play(
+    markets: list[MarketSnapshot],
+    now: float,
+    pre_start_s: float = 600.0,
+    max_duration_s: float = 12 * 3600.0,
+) -> tuple[list[MarketSnapshot], MarketSnapshot | None]:
+    """Split to in-play markets and the next upcoming match (if any)."""
+    live: list[MarketSnapshot] = []
+    upcoming: list[MarketSnapshot] = []
+    seen_upcoming: set[str] = set()
+    for market in markets:
+        if market.occurrence_ts is None:
+            continue
+        if market.is_in_play(now, pre_start_s, max_duration_s):
+            live.append(market)
+        elif market.occurrence_ts > now and market.match_id not in seen_upcoming:
+            upcoming.append(market)
+            seen_upcoming.add(market.match_id)
+    upcoming.sort(key=lambda item: item.occurrence_ts or 0.0)
+    return live, (upcoming[0] if upcoming else None)
 
 
 def _num(value: float, digits: int = 6) -> float:
