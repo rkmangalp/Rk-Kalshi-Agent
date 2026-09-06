@@ -7,7 +7,7 @@ from pathlib import Path
 
 from rk_kalshi.config import AppConfig
 from rk_kalshi.execution import PaperExecution
-from rk_kalshi.journal import FillJournal, read_fills, summarize_pnl
+from rk_kalshi.journal import FillJournal, clear_fill_logs, read_fills, summarize_pnl
 from rk_kalshi.models import Signal
 from rk_kalshi.risk import RiskManager
 from rk_kalshi.schema import AUDIT_CORE_FIELDS, FILL_FIELDS, REQUIRED_FIELDS
@@ -106,6 +106,16 @@ class FillJournalTests(unittest.TestCase):
         self.assertIn("KXWTAMATCH-26SEP06AAA-BBB", summary["by_ticker"])
         parsed = datetime.fromisoformat(fill.timestamp)
         self.assertIsNotNone(parsed.tzinfo)
+
+    def test_clear_fill_logs_removes_csv_and_jsonl(self):
+        fill = self.paper.execute(_signal(), self.state, contracts=1, latency_ms=3.0)
+        self.journal.append(fill)
+        self.assertTrue(self.cfg.fill_log_csv.exists())
+        self.assertTrue(self.cfg.fill_log_jsonl.exists())
+        clear_fill_logs(self.cfg.fill_log_csv, self.cfg.fill_log_jsonl)
+        self.assertFalse(self.cfg.fill_log_csv.exists())
+        self.assertFalse(self.cfg.fill_log_jsonl.exists())
+        self.assertEqual(read_fills(self.cfg.fill_log_csv), [])
 
     def test_local_now_iso_is_timezone_aware(self):
         parsed = datetime.fromisoformat(local_now_iso())

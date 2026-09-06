@@ -244,7 +244,7 @@
       status.trade_tennis ? (status.live_matches_only ? "live tennis" : "all tennis") : null,
     ].filter(Boolean).join(" · ") || "no books selected";
     els.startHint.textContent = running
-      ? `Paper session running (${books}) — Stop ends polling. Live orders stay disabled.`
+      ? `Paper session running (${books}) — Stop ends polling and clears paper fills. Live orders stay disabled.`
       : `Paper bankroll $${fmt(status.starting_cash, 0)} · max $${fmt(status.max_dollars_per_ticker, 0)}/trade · daily loss $${fmt(status.daily_loss_limit, 0)} · ${books}`;
   }
 
@@ -352,6 +352,7 @@
     try {
       const run = await fetchJSON("/api/stop", { method: "POST" });
       renderRun(run);
+      await refreshStatusBundle();
     } catch (err) {
       els.log.textContent = `error: ${err.message}`;
     } finally {

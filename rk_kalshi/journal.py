@@ -27,6 +27,15 @@ class FillJournal:
             handle.write(json.dumps(row, sort_keys=True) + "\n")
 
 
+def clear_fill_logs(csv_path: Path, jsonl_path: Path) -> None:
+    """Delete paper fill files so the next append starts a new log."""
+    for path in (csv_path, jsonl_path):
+        try:
+            path.unlink()
+        except FileNotFoundError:
+            continue
+
+
 def read_fills(csv_path: Path) -> list[dict]:
     if not csv_path.exists() or csv_path.stat().st_size == 0:
         return []

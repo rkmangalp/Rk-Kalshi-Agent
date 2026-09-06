@@ -23,7 +23,7 @@ from pydantic import BaseModel, Field, model_validator
 
 from rk_kalshi.client import KalshiPublicClient
 from rk_kalshi.config import AppConfig, load_config
-from rk_kalshi.journal import read_fills, summarize_pnl
+from rk_kalshi.journal import clear_fill_logs, read_fills, summarize_pnl
 from rk_kalshi.models import MarketSnapshot, select_bitcoin_tradeable
 from rk_kalshi.risk import RiskManager
 from rk_kalshi.runner import PaperRunner
@@ -106,6 +106,7 @@ class RunController:
         self.last_error: str | None = None
         self.started_at: str | None = None
         self.finished_at: str | None = None
+        self._thread: threading.Thread | None = None
 
     def snapshot(self) -> dict[str, Any]:
         with self._lock:
@@ -149,17 +150,29 @@ class RunController:
                 name="paper-run",
                 daemon=True,
             )
+            self._thread = thread
             thread.start()
         return self.snapshot()
 
     def stop(self) -> dict[str, Any]:
+        thread = None
         with self._lock:
-            if not self.running:
-                return self.snapshot()
-            self.stopping = True
-        self._stop.set()
-        self._log("stop requested — finishing current cycle (paper mode)")
+            if self.running:
+                self.stopping = True
+                thread = self._thread
+        if thread is not None:
+            self._stop.set()
+            self._log("stop requested — finishing current cycle (paper mode)")
+            thread.join(timeout=20.0)
+        self._clear_paper_book()
+        self._log("paper fills cleared")
         return self.snapshot()
+
+    def _clear_paper_book(self) -> None:
+        clear_fill_logs(self.cfg.fill_log_csv, self.cfg.fill_log_jsonl)
+        save_state(self.cfg, new_state(self.cfg))
+        with self._lock:
+            self.fills_this_run = 0
 
     def _log(self, message: str) -> None:
         line = f"{local_now_iso()}  {message}"

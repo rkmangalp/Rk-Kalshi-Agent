@@ -114,6 +114,7 @@ class DashboardApiTests(unittest.TestCase):
         self.assertIn("no live orders", response.text)
         self.assertNotIn("Place live order", response.text)
         self.assertIn("Start paper trading", response.text)
+        self.assertIn("clears paper fills", response.text)
         self.assertIn("Live tennis matches only", response.text)
         self.assertIn("Bitcoin (buy and sell YES)", response.text)
         self.assertIn("local time", response.text)
@@ -366,6 +367,8 @@ class DashboardApiTests(unittest.TestCase):
         self.assertIsNotNone(snapshot)
         self.assertFalse(snapshot["running"])
         self.assertTrue(any("stop requested" in line for line in snapshot["logs"]))
+        self.assertTrue(any("paper fills cleared" in line for line in snapshot["logs"]))
+        self.assertEqual(http.get("/api/fills").json()["count"], 0)
 
         state = load_state(app.state.service.cfg)
         self.assertAlmostEqual(state.starting_cash, 80.0)
@@ -392,6 +395,25 @@ class DashboardApiTests(unittest.TestCase):
             json={"starting_cash": 80, "trade_bitcoin": False, "trade_tennis": False},
         )
         self.assertEqual(empty.status_code, 400)
+
+    def test_stop_clears_paper_fills_even_when_idle(self):
+        from rk_kalshi.state import load_state, new_state, save_state
+
+        FillJournal(self.cfg.fill_log_csv, self.cfg.fill_log_jsonl).append(_fill())
+        dirty = new_state(self.cfg, day="2026-09-06")
+        dirty.cash = 90.0
+        dirty.fill_count = 4
+        save_state(self.cfg, dirty)
+        self.assertEqual(self.http.get("/api/fills").json()["count"], 1)
+
+        stopped = self.http.post("/api/stop")
+        self.assertEqual(stopped.status_code, 200)
+        self.assertTrue(any("paper fills cleared" in line for line in stopped.json()["logs"]))
+        self.assertEqual(self.http.get("/api/fills").json()["count"], 0)
+        self.assertEqual(self.http.get("/api/pnl").json()["fills"], 0)
+        state = load_state(self.cfg)
+        self.assertEqual(state.fill_count, 0)
+        self.assertAlmostEqual(state.cash, self.cfg.starting_cash)
 
 
 if __name__ == "__main__":
