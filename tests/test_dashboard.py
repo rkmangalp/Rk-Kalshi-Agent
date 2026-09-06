@@ -1,16 +1,48 @@
+import asyncio
 import time
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import MagicMock, patch
 
-from fastapi.testclient import TestClient
+import httpx
 
 from rk_kalshi.config import AppConfig
 from rk_kalshi.dashboard import create_app
 from rk_kalshi.journal import FillJournal
 from rk_kalshi.models import Fill, MarketSnapshot
 from rk_kalshi.schema import FILL_FIELDS, REQUIRED_FIELDS
+
+
+class _ApiClient:
+    """Sync wrapper around httpx's async ASGI transport (no httpx2 TestClient)."""
+
+    def __init__(self, app):
+        self.app = app
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+    def request(self, method: str, url: str, **kwargs):
+        async def _do():
+            transport = httpx.ASGITransport(app=self.app)
+            async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+                return await client.request(method, url, **kwargs)
+
+        return asyncio.run(_do())
+
+    def get(self, url: str, **kwargs):
+        return self.request("GET", url, **kwargs)
+
+    def post(self, url: str, **kwargs):
+        return self.request("POST", url, **kwargs)
+
+
+def _client(app) -> _ApiClient:
+    return _ApiClient(app)
 
 
 def _market() -> MarketSnapshot:
@@ -69,10 +101,9 @@ class DashboardApiTests(unittest.TestCase):
         self.client = MagicMock()
         self.client.list_tennis_markets.return_value = ([_market()], 18.5)
         self.app = create_app(self.cfg, client=self.client)
-        self.http = TestClient(self.app)
+        self.http = _client(self.app)
 
     def tearDown(self):
-        self.http.close()
         self.tmp.cleanup()
 
     def test_index_serves_paper_banner(self):
@@ -204,7 +235,7 @@ class DashboardApiTests(unittest.TestCase):
         blocker = MagicMock()
         blocker.run_once.side_effect = lambda: time.sleep(0.4) or []
         blocked = create_app(self.cfg, client=self.client, runner=blocker)
-        with TestClient(blocked) as http:
+        with _client(blocked) as http:
             first = http.post("/api/run", json={"cycles": 1, "sleep_s": 0})
             self.assertEqual(first.status_code, 200)
             second = http.post("/api/run", json={"cycles": 1, "sleep_s": 0})
