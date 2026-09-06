@@ -58,6 +58,7 @@ def _market() -> MarketSnapshot:
         updated_ts=1_700_000_000.0,
         status="open",
         series_ticker="KXATPMATCH",
+        occurrence_ts=1_700_000_000.0,
     )
 
 
@@ -113,6 +114,7 @@ class DashboardApiTests(unittest.TestCase):
         self.assertIn("no live orders", response.text)
         self.assertNotIn("Place live order", response.text)
         self.assertIn("Start paper trading", response.text)
+        self.assertIn("Live matches only", response.text)
         self.assertIn("local time", response.text)
         self.assertIn("starting-cash", response.text)
         self.assertIn("btn-stop", response.text)
@@ -154,6 +156,7 @@ class DashboardApiTests(unittest.TestCase):
         self.assertAlmostEqual(row["last_price"], 0.420)
         self.assertAlmostEqual(row["spread_cents"], 2.0)
         self.assertAlmostEqual(row["volume"], 125.0)
+        self.assertIn("in_play", row)
         self.client.list_tennis_markets.assert_called()
 
     def test_fills_and_pnl_use_locked_schema(self):
@@ -203,6 +206,7 @@ class DashboardApiTests(unittest.TestCase):
                     updated_ts=1_700_000_000.0,
                     status="active",
                     series_ticker="KXATPMATCH",
+                    occurrence_ts=time.time(),
                 )
             ],
             12.0,
@@ -306,6 +310,7 @@ class DashboardApiTests(unittest.TestCase):
         self.assertAlmostEqual(body["session"]["starting_cash"], 80.0)
         self.assertAlmostEqual(body["session"]["max_dollars_per_ticker"], 4.0)
         self.assertFalse(body["session"]["can_size_up"])
+        self.assertTrue(body["session"]["live_matches_only"])
         self.assertTrue(body["run"]["continuous"])
         self.assertTrue(body["run"]["running"])
 

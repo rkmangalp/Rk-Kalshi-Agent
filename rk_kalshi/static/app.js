@@ -27,6 +27,8 @@
     btnStart: $("btn-start"),
     btnStop: $("btn-stop"),
     startHint: $("start-hint"),
+    liveMatchesOnly: $("live-matches-only"),
+    filterLiveMarkets: $("filter-live-markets"),
     log: $("log"),
     logCount: $("log-count"),
     marketsBody: $("markets-body"),
@@ -40,6 +42,7 @@
 
   let running = false;
   let marketsTimer = null;
+  let lastMarkets = null;
   const pollMs = 700;
 
   async function fetchJSON(url, options) {
@@ -102,6 +105,7 @@
     els.maxPerTrade.disabled = !enabled;
     els.dailyLoss.disabled = !enabled;
     els.startSleep.disabled = !enabled;
+    if (els.liveMatchesOnly) els.liveMatchesOnly.disabled = !enabled;
     els.startPanel.classList.toggle("is-running", !enabled);
   }
 
@@ -117,16 +121,25 @@
   }
 
   function renderMarkets(payload) {
-    const rows = payload.markets || [];
+    const all = payload.markets || [];
+    const liveCount = all.filter((m) => m.in_play).length;
+    const liveOnly = Boolean(els.filterLiveMarkets && els.filterLiveMarkets.checked);
+    const rows = liveOnly ? all.filter((m) => m.in_play) : all;
     els.marketsMeta.textContent =
-      `${payload.count} open · ${payload.series.join(", ")} · ${fmt(payload.latency_ms, 1)} ms`;
+      `${liveCount} live / ${payload.count} open · ${payload.series.join(", ")} · ${fmt(payload.latency_ms, 1)} ms`;
+    if (!all.length) {
+      els.marketsBody.innerHTML =
+        '<tr><td colspan="9" class="empty">No open tennis markets (off-season or empty series filter).</td></tr>';
+      return;
+    }
     if (!rows.length) {
       els.marketsBody.innerHTML =
-        '<tr><td colspan="8" class="empty">No open tennis markets (off-season or empty series filter).</td></tr>';
+        '<tr><td colspan="9" class="empty">No live (in-play) tennis matches right now. Uncheck “Live only” to see upcoming books.</td></tr>';
       return;
     }
     els.marketsBody.innerHTML = rows.map((m) => `
       <tr>
+        <td>${m.in_play ? '<span class="live-dot">LIVE</span>' : "—"}</td>
         <td class="ticker">${escapeHtml(m.ticker)}</td>
         <td>${escapeHtml(m.event_name || "")}</td>
         <td class="num">${fmt(m.yes_bid, 3)}</td>
@@ -193,7 +206,7 @@
 
     const series = (status.series_tickers || []).join(", ");
     els.footer.textContent =
-      `localhost · paper_mode=true · live.enabled=false · series ${series} · edge ${status.edge_threshold_cents}¢`;
+      `localhost · paper_mode=true · live.enabled=false · live_matches_only=${status.live_matches_only} · series ${series} · edge ${status.edge_threshold_cents}¢`;
     if (!els.startForm.dataset.seeded) {
       if (status.starting_cash != null) els.startingCash.value = status.starting_cash;
       if (status.max_dollars_per_ticker != null) els.maxPerTrade.value = status.max_dollars_per_ticker;
@@ -202,12 +215,16 @@
         els.startSleep.value = status.cycle_sleep_s;
         els.sleep.value = status.cycle_sleep_s;
       }
+      if (els.liveMatchesOnly && status.live_matches_only != null) {
+        els.liveMatchesOnly.checked = Boolean(status.live_matches_only);
+      }
       els.startForm.dataset.seeded = "1";
       els.sleep.dataset.seeded = "1";
     }
+    const liveNote = status.live_matches_only ? "live matches only" : "all open matches";
     els.startHint.textContent = running
-      ? "Paper session running — Stop ends polling. Live orders stay disabled."
-      : `Paper bankroll $${fmt(status.starting_cash, 0)} · max $${fmt(status.max_dollars_per_ticker, 0)}/trade · daily loss $${fmt(status.daily_loss_limit, 0)}`;
+      ? `Paper session running (${liveNote}) — Stop ends polling. Live orders stay disabled.`
+      : `Paper bankroll $${fmt(status.starting_cash, 0)} · max $${fmt(status.max_dollars_per_ticker, 0)}/trade · daily loss $${fmt(status.daily_loss_limit, 0)} · ${liveNote}`;
   }
 
   function renderRun(run) {
@@ -251,10 +268,11 @@
     els.marketsMeta.textContent = "loading…";
     try {
       const payload = await fetchJSON("/api/markets");
+      lastMarkets = payload;
       renderMarkets(payload);
     } catch (err) {
       els.marketsBody.innerHTML =
-        `<tr><td colspan="8" class="empty error">${escapeHtml(err.message)}</td></tr>`;
+        `<tr><td colspan="9" class="empty error">${escapeHtml(err.message)}</td></tr>`;
       els.marketsMeta.textContent = "Kalshi request failed";
     }
   }
@@ -295,6 +313,7 @@
           daily_loss_limit: dailyLoss,
           sleep_s: Number.isFinite(sleep) ? sleep : 15,
           continuous: true,
+          live_matches_only: Boolean(els.liveMatchesOnly && els.liveMatchesOnly.checked),
           mode: "paper",
         }),
       });
@@ -325,6 +344,11 @@
   els.btnStart.addEventListener("click", () => startSession());
   els.btnStop.addEventListener("click", () => stopSession());
   els.btnMarkets.addEventListener("click", () => { refreshMarkets(); });
+  if (els.filterLiveMarkets) {
+    els.filterLiveMarkets.addEventListener("change", () => {
+      if (lastMarkets) renderMarkets(lastMarkets);
+    });
+  }
   els.autoMarkets.addEventListener("change", () => {
     if (marketsTimer) {
       clearInterval(marketsTimer);
