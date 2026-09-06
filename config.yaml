@@ -1,0 +1,54 @@
+# Paper-trading config for Kalshi tennis markets.
+# Live order submission stays disabled. Do not size up until paper P&L
+# is positive on a large sample (see sizing.min_fills_before_size_up).
+
+kalshi:
+  base_url: https://external-api.kalshi.com/trade-api/v2
+  # Public market-data reads do not require API keys.
+  series_tickers:
+    - KXATPMATCH
+    - KXWTAMATCH
+    - KXITFWMATCH
+  request_timeout_s: 15.0
+  page_limit: 200
+
+bankroll:
+  starting_cash: 100.0
+
+risk:
+  # Max dollars of exposure per market ticker (not per-contract price).
+  max_dollars_per_ticker: 5.0
+  daily_loss_limit: 15.0
+  # Martingale is forbidden in code even if this is flipped.
+  allow_martingale: false
+
+sizing:
+  # LOCKED OFF. can_size_up stays false until this is true AND
+  # fill_count >= min_fills_before_size_up AND running paper P&L > 0.
+  allow_size_up: false
+  min_fills_before_size_up: 200
+  base_contracts: 1
+
+signal:
+  # Net edge after half-spread + Kalshi quadratic fee, on a 0–100¢ scale.
+  edge_threshold_cents: 3.0
+  fee_coefficient: 0.07
+  fee_multiplier: 1.0
+  ema_alpha: 0.30
+  last_trade_weight: 0.50
+  # Ignore last prints this far from mid — usually a stale tape, not edge.
+  max_last_dislocation_cents: 8.0
+  max_spread_cents: 8.0
+  stale_mid_seconds: 180
+  min_volume: 0.0
+
+paper:
+  fill_log_csv: data/fills.csv
+  fill_log_jsonl: data/fills.jsonl
+  state_path: data/paper_state.json
+  cycle_sleep_s: 15.0
+  max_signals_per_cycle: 8
+
+live:
+  # Must stay false. LiveKalshiExecution raises if called.
+  enabled: false
