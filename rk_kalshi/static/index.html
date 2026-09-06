@@ -3,8 +3,9 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Cache-Control" content="no-store">
   <title>Rk Kalshi Paper Desk</title>
-  <link rel="stylesheet" href="/static/app.css">
+  <link rel="stylesheet" href="/static/app.css?v=localtime2">
 </head>
 <body>
   <div class="banner" role="status">
@@ -176,13 +177,13 @@
   <section class="panel">
     <div class="panel-head">
       <h2>Paper fills</h2>
-      <span class="muted" id="fills-meta">locked schema · newest first</span>
+      <span class="muted" id="fills-meta">local clock · newest first</span>
     </div>
     <div class="table-wrap">
       <table id="fills-table">
         <thead>
           <tr>
-            <th>local time</th>
+            <th id="fills-time-head">local time</th>
             <th>ticker</th>
             <th>side</th>
             <th class="num">fill_price</th>
@@ -206,6 +207,6 @@
     <span id="footer-meta">localhost · paper_mode=true · live.enabled cannot be turned on from this UI</span>
   </footer>
 
-  <script src="/static/app.js"></script>
+  <script src="/static/app.js?v=localtime2"></script>
 </body>
 </html>

@@ -547,7 +547,13 @@ def create_app(
         page = STATIC_DIR / "index.html"
         if not page.exists():
             raise HTTPException(500, "dashboard static files are missing")
-        return FileResponse(page)
+        return FileResponse(
+            page,
+            headers={
+                "Cache-Control": "no-store, max-age=0",
+                "Pragma": "no-cache",
+            },
+        )
 
     @app.get("/api/health")
     def health() -> dict[str, Any]:

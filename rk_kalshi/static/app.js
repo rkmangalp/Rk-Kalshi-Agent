@@ -64,11 +64,19 @@
     return data;
   }
 
-  function formatLocalDateTime(value) {
-    if (value == null || value === "") return "";
+  function parseTimestamp(value) {
+    if (value == null || value === "") return null;
     const text = String(value).trim();
-    const parsed = new Date(text);
-    if (Number.isNaN(parsed.getTime())) return text;
+    for (const candidate of [text, text.replace(" ", "T")]) {
+      const parsed = new Date(candidate);
+      if (!Number.isNaN(parsed.getTime())) return parsed;
+    }
+    return null;
+  }
+
+  function formatLocalDateTime(value) {
+    const parsed = parseTimestamp(value);
+    if (!parsed) return value == null ? "" : String(value);
     return parsed.toLocaleString(undefined, {
       year: "numeric",
       month: "short",
@@ -76,7 +84,24 @@
       hour: "numeric",
       minute: "2-digit",
       second: "2-digit",
+      timeZoneName: "short",
     });
+  }
+
+  function localTimeZoneLabel() {
+    try {
+      const parts = new Intl.DateTimeFormat(undefined, { timeZoneName: "short" })
+        .formatToParts(new Date());
+      const short = (parts.find((part) => part.type === "timeZoneName") || {}).value;
+      return short || Intl.DateTimeFormat().resolvedOptions().timeZone || "local";
+    } catch {
+      return "local";
+    }
+  }
+
+  function applyLocalTimeHeaders() {
+    const head = $("fills-time-head");
+    if (head) head.textContent = `local time (${localTimeZoneLabel()})`;
   }
 
   function formatLogLine(line) {
@@ -166,7 +191,8 @@
 
   function renderFills(payload) {
     const rows = payload.fills || [];
-    els.fillsMeta.textContent = `${rows.length} fill${rows.length === 1 ? "" : "s"} · locked schema · newest first`;
+    els.fillsMeta.textContent =
+      `${rows.length} fill${rows.length === 1 ? "" : "s"} · local clock · newest first`;
     if (!rows.length) {
       els.fillsBody.innerHTML =
         '<tr><td colspan="11" class="empty">No paper fills yet — run a cycle.</td></tr>';
@@ -174,7 +200,7 @@
     }
     els.fillsBody.innerHTML = rows.map((f) => `
       <tr>
-        <td class="ticker">${escapeHtml(formatLocalDateTime(f.timestamp))}</td>
+        <td class="when">${escapeHtml(formatLocalDateTime(f.timestamp))}</td>
         <td class="ticker">${escapeHtml(f.ticker || "")}</td>
         <td>${escapeHtml(f.side || "")}</td>
         <td class="num">${fmt(f.fill_price)}</td>
@@ -393,6 +419,7 @@
     });
   }, pollMs);
 
+  applyLocalTimeHeaders();
   refreshStatusBundle().catch((err) => {
     els.log.textContent = `error: ${err.message}`;
   });

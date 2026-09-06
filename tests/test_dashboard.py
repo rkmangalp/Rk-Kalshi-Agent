@@ -117,6 +117,9 @@ class DashboardApiTests(unittest.TestCase):
         self.assertIn("Live tennis matches only", response.text)
         self.assertIn("Bitcoin (buy and sell YES)", response.text)
         self.assertIn("local time", response.text)
+        self.assertIn("fills-time-head", response.text)
+        self.assertIn("app.js?v=", response.text)
+        self.assertIn("no-store", (response.headers.get("cache-control") or "").lower())
         self.assertIn("starting-cash", response.text)
         self.assertIn("btn-stop", response.text)
 
@@ -205,6 +208,7 @@ class DashboardApiTests(unittest.TestCase):
         row = payload["fills"][0]
         for name in REQUIRED_FIELDS:
             self.assertIn(name, row)
+        self.assertEqual(row["timestamp"], "2026-09-06T02:00:00.000000Z")
         self.assertEqual(row["ticker"], "KXATPMATCH-26SEP06AAA-BBB")
         self.assertEqual(row["match_id"], "KXATPMATCH-26SEP06AAA")
         self.assertFalse(row["can_size_up"])
