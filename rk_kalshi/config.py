@@ -48,6 +48,10 @@ class AppConfig:
     cycle_sleep_s: float = 15.0
     max_signals_per_cycle: int = 8
     live_enabled: bool = False
+    target_url: str = ""
+    target_event_ticker: str = ""
+    target_market_ticker: str = ""
+    target_label: str = ""
 
     def enabled_series_tickers(self) -> tuple[str, ...]:
         ordered: list[str] = []

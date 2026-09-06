@@ -218,6 +218,29 @@ def select_bitcoin_tradeable(
     return kept
 
 
+def select_targeted_tennis(
+    markets: list[MarketSnapshot],
+    event_ticker: str = "",
+    market_ticker: str = "",
+) -> list[MarketSnapshot]:
+    """Keep one pasted/selected tennis match (or a single market on that match)."""
+    market_key = (market_ticker or "").strip().upper()
+    event_key = (event_ticker or "").strip().upper()
+    if market_key:
+        exact = [m for m in markets if m.ticker.upper() == market_key]
+        if exact:
+            return exact
+        parent = market_key.rsplit("-", 1)[0]
+        event_key = event_key or parent
+    if not event_key:
+        return list(markets)
+    return [
+        m
+        for m in markets
+        if m.event_ticker.upper() == event_key or m.match_id.upper() == event_key
+    ]
+
+
 def select_in_play(
     markets: list[MarketSnapshot],
     now: float,

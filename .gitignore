@@ -15,4 +15,5 @@ htmlcov/
 data/*.csv
 data/*.jsonl
 data/*.json
+data/archive/
 !data/.gitkeep

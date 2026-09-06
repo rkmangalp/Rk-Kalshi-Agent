@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta http-equiv="Cache-Control" content="no-store">
   <title>Rk Kalshi Paper Desk</title>
-  <link rel="stylesheet" href="/static/app.css?v=localtime2">
+  <link rel="stylesheet" href="/static/app.css?v=contract1">
 </head>
 <body>
   <div class="banner" role="status">
@@ -30,8 +30,12 @@
       <p class="lede">
         Set a paper bankroll, then Start. Paper-trades Kalshi
         <strong>Bitcoin buy and sell</strong> (YES contracts) and optional
-        live tennis. This is simulated cash — the UI cannot place live
-        Kalshi or exchange orders. <code>can_size_up</code> stays locked.
+        live tennis. Optionally lock tennis to <strong>one pasted
+        Kalshi match</strong>. This is simulated cash — the UI cannot
+        place live Kalshi or exchange orders. <code>can_size_up</code>
+        stays locked. Stop ends polling. <strong>Clear</strong> wipes
+        the local paper session (fills, P&amp;L, log, selected match) —
+        not a live Kalshi account.
       </p>
     </div>
     <form id="start-form" class="start-form">
@@ -63,10 +67,43 @@
         <input type="checkbox" id="live-matches-only" checked>
         Live tennis matches only (in-play)
       </label>
+      <div class="contract-box" id="contract-box">
+        <p class="eyebrow">Tennis contract</p>
+        <h3>Choose a match to paper-trade</h3>
+        <p class="fine">
+          If a match is set, paper tennis uses <strong>only that
+          match’s contracts</strong> — not every open book. Paste a
+          Kalshi tennis URL or pick a listed event.
+        </p>
+        <label>
+          Open tennis matches
+          <select id="contract-select">
+            <option value="">All open tennis (no specific match)</option>
+          </select>
+        </label>
+        <label class="contract-url">
+          Paste Kalshi tennis match URL or ticker
+          <input id="contract-url" type="text" spellcheck="false" placeholder="https://kalshi.com/markets/kxatpmatch/atp-tennis-match/kxatpmatch-26sep06cerblo">
+        </label>
+        <div class="contract-actions">
+          <button type="button" id="btn-use-contract">Use this match</button>
+          <button type="button" id="btn-clear-contract">Clear selection</button>
+        </div>
+        <p class="fine" id="contract-status">No match selected — tennis can scan the full universe.</p>
+        <p class="fine examples">
+          Examples:
+          <code>https://kalshi.com/markets/kxatpmatch/atp-tennis-match/kxatpmatch-26sep06cerblo</code>
+          ·
+          <code>https://kalshi.com/markets/kxwtamatch/wta-tennis-match/kxwtamatch-26mar29vekgor</code>
+          · ticker <code>KXATPMATCH-26SEP06CERBLO</code>
+        </p>
+      </div>
       <div class="start-actions">
         <button type="button" id="btn-start" class="primary start-btn">Start</button>
         <button type="button" id="btn-stop" class="stop-btn" hidden>Stop</button>
+        <button type="button" id="btn-clear-session" class="clear-btn">Clear</button>
       </div>
+      <p class="fine" id="clear-hint">Clear resets this local paper book only. It does not cancel or touch live Kalshi orders.</p>
       <p class="fine" id="start-hint">Defaults come from config.yaml and last Start (paper only).</p>
     </form>
   </section>
@@ -210,6 +247,6 @@
     <span id="footer-meta">localhost · paper_mode=true · live.enabled cannot be turned on from this UI</span>
   </footer>
 
-  <script src="/static/app.js?v=localtime2"></script>
+  <script src="/static/app.js?v=contract1"></script>
 </body>
 </html>

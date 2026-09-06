@@ -78,10 +78,29 @@ Optional: `python3 -m pip install -e .` then `rk-kalshi list-tennis-markets`.
 ## Dashboard (Windows)
 
 The dashboard is a local FastAPI app: a **Start** page sets paper bankroll
-(default $100), max $ per trade, and daily loss, then polls **live (in-play)
-tennis matches** until **Stop**. Upcoming books are shown but not paper-traded
-while “Live matches only” is on. It **cannot** place live orders.
-`can_size_up` stays locked.
+(default $100), max $ per trade, and daily loss, then polls until **Stop**.
+You can lock tennis to **one Kalshi match** by pasting a public tennis URL
+or picking an open event. When a match is set, paper tennis uses only that
+match’s contracts — not the full ATP/WTA/ITF universe.
+
+Example Kalshi tennis URLs:
+
+```
+https://kalshi.com/markets/kxatpmatch/atp-tennis-match/kxatpmatch-26sep06cerblo
+https://kalshi.com/markets/kxwtamatch/wta-tennis-match/kxwtamatch-26mar29vekgor
+https://kalshi.com/markets/kxitfwmatch/itf-womens-match/kxitfwmatch-26sep06kursid
+```
+
+A bare event ticker such as `KXATPMATCH-26SEP06CERBLO` also works. Series
+pages (`/markets/kxatpmatch`) and non-tennis Kalshi links are rejected.
+
+**Stop** ends polling and leaves the paper book on screen so you can read
+it. **Clear** (shown after Stop / while idle) archives then wipes the
+*local* paper session: fills journal, bankroll state, P&L, live log, and
+the selected contract. It does **not** touch a live Kalshi account.
+Upcoming books are shown but not paper-traded while “Live matches only”
+is on (unless a specific match is selected). The UI **cannot** place live
+orders. `can_size_up` stays locked.
 Chosen amounts are written to `data/dashboard_session.json` and
 `config.yaml` so the next paper-run uses them. Default bind is
 `127.0.0.1:8765`.
