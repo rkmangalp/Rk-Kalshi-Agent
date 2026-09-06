@@ -116,7 +116,10 @@
     <article class="panel log-panel">
       <div class="panel-head">
         <h2>Live log</h2>
-        <span class="muted" id="log-count">0 lines</span>
+        <div class="toolbar">
+          <span class="muted" id="log-count">0 lines</span>
+          <button type="button" id="btn-clear-logs">Clear logs</button>
+        </div>
       </div>
       <pre id="log" class="log" aria-live="polite">Waiting for a paper-run…</pre>
     </article>

@@ -31,6 +31,7 @@
     filterLiveMarkets: $("filter-live-markets"),
     log: $("log"),
     logCount: $("log-count"),
+    btnClearLogs: $("btn-clear-logs"),
     marketsBody: $("markets-body"),
     marketsMeta: $("markets-meta"),
     autoMarkets: $("auto-markets"),
@@ -341,8 +342,20 @@
     const cycles = Math.max(1, Number(els.cycles.value) || 1);
     startRun(cycles);
   });
+  async function clearLogs() {
+    try {
+      const run = await fetchJSON("/api/logs/clear", { method: "POST" });
+      renderRun(run);
+    } catch (err) {
+      els.log.textContent = `error: ${err.message}`;
+    }
+  }
+
   els.btnStart.addEventListener("click", () => startSession());
   els.btnStop.addEventListener("click", () => stopSession());
+  if (els.btnClearLogs) {
+    els.btnClearLogs.addEventListener("click", () => clearLogs());
+  }
   els.btnMarkets.addEventListener("click", () => { refreshMarkets(); });
   if (els.filterLiveMarkets) {
     els.filterLiveMarkets.addEventListener("change", () => {

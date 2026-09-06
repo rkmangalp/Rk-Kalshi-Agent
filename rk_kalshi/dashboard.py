@@ -159,6 +159,13 @@ class RunController:
         self._log("stop requested — finishing current cycle (paper mode)")
         return self.snapshot()
 
+    def clear_logs(self) -> dict[str, Any]:
+        with self._lock:
+            self.logs.clear()
+            self.last_error = None
+        self._log("logs cleared")
+        return self.snapshot()
+
     def _log(self, message: str) -> None:
         line = f"{local_now_iso()}  {message}"
         with self._lock:
@@ -600,6 +607,10 @@ def create_app(
     @app.post("/api/stop")
     def stop_session() -> dict[str, Any]:
         return service.controller.stop()
+
+    @app.post("/api/logs/clear")
+    def clear_logs() -> dict[str, Any]:
+        return service.controller.clear_logs()
 
     return app
 
