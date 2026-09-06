@@ -124,6 +124,10 @@ class DashboardApiTests(unittest.TestCase):
         self.assertIn("btn-stop", response.text)
         self.assertIn("btn-clear-logs", response.text)
         self.assertIn("Clear logs", response.text)
+        self.assertIn("btn-clear-session", response.text)
+        self.assertIn("contract-url", response.text)
+        self.assertIn("kalshi.com/markets/kxatpmatch", response.text)
+        self.assertIn("not a live Kalshi account", response.text)
 
     def test_health_and_status_lock_paper_mode(self):
         health = self.http.get("/api/health")
@@ -359,6 +363,9 @@ class DashboardApiTests(unittest.TestCase):
 
         busy = http.post("/api/start", json={"starting_cash": 80, "sleep_s": 10})
         self.assertEqual(busy.status_code, 409)
+        clear_busy = http.post("/api/clear")
+        self.assertEqual(clear_busy.status_code, 409)
+        self.assertIn("Stop", clear_busy.json()["detail"])
 
         stopped = http.post("/api/stop")
         self.assertEqual(stopped.status_code, 200)
@@ -412,6 +419,63 @@ class DashboardApiTests(unittest.TestCase):
         self.assertEqual(len(logs), 1)
         self.assertIn("logs cleared", logs[0])
         self.assertFalse(any("PAPER MODE ONLY" in line for line in logs))
+
+    def test_contract_parse_and_clear_session(self):
+        from rk_kalshi.state import load_state, new_state, save_state
+
+        bad = self.http.post("/api/contract", json={"url": "https://example.com/foo"})
+        self.assertEqual(bad.status_code, 400)
+        self.assertIn("not a Kalshi link", bad.json()["detail"])
+
+        series = self.http.post(
+            "/api/contract",
+            json={"url": "https://kalshi.com/markets/kxatpmatch"},
+        )
+        self.assertEqual(series.status_code, 400)
+        self.assertIn("series page", series.json()["detail"])
+
+        crypto = self.http.post(
+            "/api/contract",
+            json={"url": "https://kalshi.com/markets/kxbtc15m/bitcoin/kxbtc15m-26sep060015"},
+        )
+        self.assertEqual(crypto.status_code, 400)
+
+        ok = self.http.post(
+            "/api/contract",
+            json={
+                "url": "https://kalshi.com/markets/kxatpmatch/atp-tennis-match/kxatpmatch-26sep06cerblo"
+            },
+        )
+        self.assertEqual(ok.status_code, 200)
+        target = ok.json()["target"]
+        self.assertTrue(target["active"])
+        self.assertEqual(target["event_ticker"], "KXATPMATCH-26SEP06CERBLO")
+        self.assertEqual(target["match_id"], "KXATPMATCH-26SEP06CERBLO")
+        self.assertTrue(ok.json()["paper_mode"])
+        self.assertFalse(ok.json()["live_enabled"])
+        listed = self.http.get("/api/contract")
+        self.assertEqual(listed.status_code, 200)
+        self.assertEqual(listed.json()["target"]["event_ticker"], "KXATPMATCH-26SEP06CERBLO")
+        self.assertTrue(listed.json()["examples"])
+
+        FillJournal(self.cfg.fill_log_csv, self.cfg.fill_log_jsonl).append(_fill())
+        dirty = new_state(self.cfg, day="2026-09-06")
+        dirty.cash = 90.0
+        dirty.fill_count = 3
+        save_state(self.cfg, dirty)
+        self.assertEqual(self.http.get("/api/fills").json()["count"], 1)
+
+        wiped = self.http.post("/api/clear")
+        self.assertEqual(wiped.status_code, 200)
+        self.assertTrue(wiped.json()["cleared"])
+        self.assertFalse(wiped.json()["target"]["active"])
+        self.assertIn("not a live Kalshi account", wiped.json()["note"])
+        self.assertEqual(self.http.get("/api/fills").json()["count"], 0)
+        state = load_state(self.cfg)
+        self.assertEqual(state.fill_count, 0)
+        self.assertAlmostEqual(state.cash, self.cfg.starting_cash)
+        logs = wiped.json()["run"]["logs"]
+        self.assertTrue(any("paper session cleared" in line for line in logs))
 
 
 if __name__ == "__main__":

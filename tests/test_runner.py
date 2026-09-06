@@ -155,6 +155,93 @@ class RunnerTests(unittest.TestCase):
         self.assertEqual(runner.run_once(), [])
         self.assertEqual(runner.last_scan["bitcoin"], 0)
 
+    def test_run_once_targets_selected_tennis_match_only(self):
+        from dataclasses import replace
+
+        wanted = MarketSnapshot(
+            ticker="KXATPMATCH-26SEP06CERBLO-CER",
+            event_ticker="KXATPMATCH-26SEP06CERBLO",
+            event_name="Cerundolo vs Blockx",
+            title="Cerundolo wins",
+            yes_bid=0.395,
+            yes_ask=0.405,
+            last_price=0.40,
+            volume=50.0,
+            updated_ts=time.time(),
+            status="active",
+            series_ticker="KXATPMATCH",
+            occurrence_ts=time.time() + 6 * 3600,
+        )
+        other = MarketSnapshot(
+            ticker="KXATPMATCH-26SEP06FOOBAR-FOO",
+            event_ticker="KXATPMATCH-26SEP06FOOBAR",
+            event_name="Foo vs Bar",
+            title="Foo wins",
+            yes_bid=0.395,
+            yes_ask=0.405,
+            last_price=0.40,
+            volume=50.0,
+            updated_ts=time.time(),
+            status="active",
+            series_ticker="KXATPMATCH",
+            occurrence_ts=time.time(),
+        )
+        cfg = replace(
+            self.cfg,
+            target_event_ticker="KXATPMATCH-26SEP06CERBLO",
+            live_matches_only=True,
+            trade_bitcoin=True,
+        )
+        seeded = new_state(cfg, day="2026-09-06")
+        seeded.ema[wanted.ticker] = 0.60
+        seeded.ema[other.ticker] = 0.60
+        save_state(cfg, seeded)
+        client = MagicMock()
+        client.list_markets.return_value = ([wanted, other], 9.0)
+        runner = PaperRunner(cfg, client=client)
+        fills = runner.run_once()
+        self.assertEqual(len(fills), 1)
+        self.assertEqual(fills[0].ticker, wanted.ticker)
+        self.assertEqual(runner.last_scan["targeted"], 1)
+
+    def test_select_targeted_tennis_filters_event_and_market(self):
+        from rk_kalshi.models import select_targeted_tennis
+
+        match = MarketSnapshot(
+            ticker="KXATPMATCH-26SEP06CERBLO-CER",
+            event_ticker="KXATPMATCH-26SEP06CERBLO",
+            event_name="Cerundolo vs Blockx",
+            title="Cerundolo wins",
+            yes_bid=0.40,
+            yes_ask=0.41,
+            last_price=0.40,
+            volume=10.0,
+            updated_ts=time.time(),
+            status="active",
+            series_ticker="KXATPMATCH",
+        )
+        other = MarketSnapshot(
+            ticker="KXATPMATCH-26SEP06FOOBAR-FOO",
+            event_ticker="KXATPMATCH-26SEP06FOOBAR",
+            event_name="Foo vs Bar",
+            title="Foo wins",
+            yes_bid=0.40,
+            yes_ask=0.41,
+            last_price=0.40,
+            volume=10.0,
+            updated_ts=time.time(),
+            status="active",
+            series_ticker="KXATPMATCH",
+        )
+        event_only = select_targeted_tennis(
+            [match, other], event_ticker="KXATPMATCH-26SEP06CERBLO"
+        )
+        self.assertEqual([m.ticker for m in event_only], [match.ticker])
+        market_only = select_targeted_tennis(
+            [match, other], market_ticker="KXATPMATCH-26SEP06CERBLO-CER"
+        )
+        self.assertEqual([m.ticker for m in market_only], [match.ticker])
+
 
 if __name__ == "__main__":
     unittest.main()

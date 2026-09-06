@@ -6,7 +6,14 @@ from rk_kalshi.client import KalshiPublicClient
 from rk_kalshi.config import AppConfig
 from rk_kalshi.execution import PaperExecution
 from rk_kalshi.journal import FillJournal
-from rk_kalshi.models import Fill, MarketSnapshot, Signal, select_bitcoin_tradeable, select_in_play
+from rk_kalshi.models import (
+    Fill,
+    MarketSnapshot,
+    Signal,
+    select_bitcoin_tradeable,
+    select_in_play,
+    select_targeted_tennis,
+)
 from rk_kalshi.risk import RiskManager
 from rk_kalshi.signal import TennisSignalEngine
 from rk_kalshi.state import load_state, save_state
@@ -27,6 +34,9 @@ class PaperRunner:
             "bitcoin": 0,
             "next_event_name": "",
             "next_start_iso": "",
+            "targeted": 0,
+            "target_event_ticker": "",
+            "target_market_ticker": "",
         }
 
     def close(self) -> None:
@@ -69,7 +79,20 @@ class PaperRunner:
                 else ""
             ),
         }
-        tennis_tradeable = live if self.cfg.live_matches_only else tennis
+        targeted: list[MarketSnapshot] = []
+        has_target = bool(self.cfg.target_event_ticker or self.cfg.target_market_ticker)
+        if has_target:
+            targeted = select_targeted_tennis(
+                tennis,
+                event_ticker=self.cfg.target_event_ticker,
+                market_ticker=self.cfg.target_market_ticker,
+            )
+            tennis_tradeable = targeted
+        else:
+            tennis_tradeable = live if self.cfg.live_matches_only else tennis
+        self.last_scan["targeted"] = len(targeted)
+        self.last_scan["target_event_ticker"] = self.cfg.target_event_ticker
+        self.last_scan["target_market_ticker"] = self.cfg.target_market_ticker
         tradeable: list[MarketSnapshot] = []
         if self.cfg.trade_tennis:
             tradeable.extend(tennis_tradeable)

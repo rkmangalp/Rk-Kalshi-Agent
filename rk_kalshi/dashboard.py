@@ -7,9 +7,11 @@ from __future__ import annotations
 
 import json
 import re
+import shutil
 import threading
 import time
 import webbrowser
+from datetime import datetime
 from collections import deque
 from contextlib import asynccontextmanager
 from dataclasses import replace
@@ -23,7 +25,8 @@ from pydantic import BaseModel, Field, model_validator
 
 from rk_kalshi.client import KalshiPublicClient
 from rk_kalshi.config import AppConfig, load_config
-from rk_kalshi.journal import read_fills, summarize_pnl
+from rk_kalshi.journal import clear_fill_logs, read_fills, summarize_pnl
+from rk_kalshi.kalshi_url import EXAMPLE_URLS, KalshiTennisUrlError, parse_tennis_contract
 from rk_kalshi.models import MarketSnapshot, select_bitcoin_tradeable
 from rk_kalshi.risk import RiskManager
 from rk_kalshi.runner import PaperRunner
@@ -79,11 +82,27 @@ class StartRequest(BaseModel):
     live_matches_only: bool = True
     trade_bitcoin: bool = True
     trade_tennis: bool = True
+    target_url: str | None = None
+    target_event_ticker: str | None = None
+    target_market_ticker: str | None = None
     live: bool | None = None
     mode: str | None = None
 
     @model_validator(mode="after")
     def reject_live(self) -> "StartRequest":
+        _reject_live(self.live, self.mode)
+        return self
+
+
+class ContractRequest(BaseModel):
+    url: str | None = None
+    event_ticker: str | None = None
+    market_ticker: str | None = None
+    live: bool | None = None
+    mode: str | None = None
+
+    @model_validator(mode="after")
+    def reject_live(self) -> "ContractRequest":
         _reject_live(self.live, self.mode)
         return self
 
@@ -168,6 +187,17 @@ class RunController:
         self._log("logs cleared")
         return self.snapshot()
 
+    def reset_ui_state(self) -> dict[str, Any]:
+        with self._lock:
+            self.logs.clear()
+            self.last_error = None
+            self.fills_this_run = 0
+            self.cycles_done = 0
+            self.started_at = None
+            self.finished_at = None
+        self._log("paper session cleared — local paper data only; no live Kalshi account")
+        return self.snapshot()
+
     def _log(self, message: str) -> None:
         line = f"{local_now_iso()}  {message}"
         with self._lock:
@@ -182,10 +212,17 @@ class RunController:
         interval = self.cfg.cycle_sleep_s if sleep_s is None else sleep_s
         try:
             if continuous:
-                self._log(
-                    "PAPER MODE ONLY — Start: polling Bitcoin (buy+sell YES) and "
-                    "tennis until Stop; live orders disabled; can_size_up stays locked"
-                )
+                target = self.cfg.target_event_ticker or self.cfg.target_label
+                if target:
+                    self._log(
+                        f"PAPER MODE ONLY — Start: paper-trading selected tennis "
+                        f"match {target} only; live orders disabled; can_size_up stays locked"
+                    )
+                else:
+                    self._log(
+                        "PAPER MODE ONLY — Start: polling Bitcoin (buy+sell YES) and "
+                        "tennis until Stop; live orders disabled; can_size_up stays locked"
+                    )
             else:
                 self._log(
                     f"PAPER MODE ONLY — starting {cycles} cycle(s); "
@@ -196,7 +233,13 @@ class RunController:
                 if not continuous and index >= cycles:
                     break
                 label = f"{index + 1}" if continuous else f"{index + 1}/{cycles}"
-                self._log(f"cycle {label}: scanning Bitcoin and tennis markets")
+                if self.cfg.target_event_ticker:
+                    self._log(
+                        f"cycle {label}: scanning selected tennis match "
+                        f"{self.cfg.target_event_ticker}"
+                    )
+                else:
+                    self._log(f"cycle {label}: scanning Bitcoin and tennis markets")
                 fills = self.runner.run_once()
                 scan = getattr(self.runner, "last_scan", None) or {}
                 if scan:
@@ -206,9 +249,15 @@ class RunController:
                         f"(live-matches-only={self.cfg.live_matches_only} "
                         f"btc={self.cfg.trade_bitcoin} tennis={self.cfg.trade_tennis})"
                     )
+                    if scan.get("target_event_ticker"):
+                        self._log(
+                            f"  selected match {scan.get('target_event_ticker')} "
+                            f"contracts={scan.get('targeted', 0)}"
+                        )
                     if (
                         self.cfg.trade_tennis
                         and self.cfg.live_matches_only
+                        and not self.cfg.target_event_ticker
                         and not scan.get("live")
                     ):
                         nxt = scan.get("next_event_name") or "none scheduled"
@@ -298,6 +347,10 @@ class DashboardService:
         live_matches_only: bool = True,
         trade_bitcoin: bool = True,
         trade_tennis: bool = True,
+        target_url: str | None = None,
+        target_event_ticker: str | None = None,
+        target_market_ticker: str | None = None,
+        target_label: str | None = None,
     ) -> dict[str, Any]:
         sleep_s = self.cfg.cycle_sleep_s if cycle_sleep_s is None else cycle_sleep_s
         cfg = replace(
@@ -309,6 +362,14 @@ class DashboardService:
             live_matches_only=bool(live_matches_only),
             trade_bitcoin=bool(trade_bitcoin),
             trade_tennis=bool(trade_tennis),
+            target_url=self.cfg.target_url if target_url is None else target_url,
+            target_event_ticker=(
+                self.cfg.target_event_ticker if target_event_ticker is None else target_event_ticker
+            ),
+            target_market_ticker=(
+                self.cfg.target_market_ticker if target_market_ticker is None else target_market_ticker
+            ),
+            target_label=self.cfg.target_label if target_label is None else target_label,
             live_enabled=False,
         )
         self.bind_config(cfg)
@@ -324,11 +385,106 @@ class DashboardService:
             "live_matches_only": cfg.live_matches_only,
             "trade_bitcoin": cfg.trade_bitcoin,
             "trade_tennis": cfg.trade_tennis,
+            "target": _target_payload(cfg),
             "can_size_up": False,
             "allow_size_up": cfg.allow_size_up,
             "state": applied,
             "persisted": persisted,
         }
+
+    def set_contract(self, body: ContractRequest) -> dict[str, Any]:
+        raw = (body.url or body.market_ticker or body.event_ticker or "").strip()
+        if not raw:
+            cfg = replace(
+                self.cfg,
+                target_url="",
+                target_event_ticker="",
+                target_market_ticker="",
+                target_label="",
+                live_enabled=False,
+            )
+            self.bind_config(cfg)
+            _persist_session(cfg, self.config_path)
+            return {
+                "paper_mode": True,
+                "live_enabled": False,
+                "contract": None,
+                "target": _target_payload(cfg),
+            }
+        try:
+            parsed = parse_tennis_contract(raw)
+        except KalshiTennisUrlError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        label = parsed.event_ticker
+        cfg = replace(
+            self.cfg,
+            target_url=parsed.raw if parsed.source == "url" else "",
+            target_event_ticker=parsed.event_ticker,
+            target_market_ticker=parsed.market_ticker or "",
+            target_label=label,
+            trade_tennis=True,
+            live_enabled=False,
+        )
+        self.bind_config(cfg)
+        _persist_session(cfg, self.config_path)
+        return {
+            "paper_mode": True,
+            "live_enabled": False,
+            "contract": parsed.as_dict() | {"label": label},
+            "target": _target_payload(cfg),
+        }
+
+    def clear_session(self) -> dict[str, Any]:
+        if self.controller.snapshot()["running"]:
+            raise HTTPException(status_code=409, detail="Stop the paper-run before Clear")
+        archived = _archive_paper_session(self.cfg)
+        clear_fill_logs(self.cfg.fill_log_csv, self.cfg.fill_log_jsonl)
+        save_state(self.cfg, new_state(self.cfg))
+        cfg = replace(
+            self.cfg,
+            target_url="",
+            target_event_ticker="",
+            target_market_ticker="",
+            target_label="",
+            live_enabled=False,
+        )
+        self.bind_config(cfg)
+        _persist_session(cfg, self.config_path)
+        run = self.controller.reset_ui_state()
+        return {
+            "paper_mode": True,
+            "live_enabled": False,
+            "archived_to": archived,
+            "target": _target_payload(cfg),
+            "run": run,
+            "cleared": True,
+            "note": "Cleared local paper session only — not a live Kalshi account.",
+        }
+
+
+def _target_payload(cfg: AppConfig) -> dict[str, Any]:
+    return {
+        "url": cfg.target_url,
+        "event_ticker": cfg.target_event_ticker,
+        "market_ticker": cfg.target_market_ticker,
+        "match_id": cfg.target_event_ticker,
+        "label": cfg.target_label or cfg.target_event_ticker,
+        "active": bool(cfg.target_event_ticker or cfg.target_market_ticker),
+        "examples": list(EXAMPLE_URLS),
+    }
+
+
+def _archive_paper_session(cfg: AppConfig) -> str | None:
+    files = [cfg.fill_log_csv, cfg.fill_log_jsonl, cfg.state_path]
+    existing = [path for path in files if path.exists() and path.stat().st_size > 0]
+    if not existing:
+        return None
+    stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    dest = cfg.state_path.parent / "archive" / stamp
+    dest.mkdir(parents=True, exist_ok=True)
+    for path in existing:
+        shutil.copy2(path, dest / path.name)
+    return str(dest)
 
 
 def _session_path(cfg: AppConfig) -> Path:
@@ -359,6 +515,10 @@ def _cfg_from_session(cfg: AppConfig) -> AppConfig:
         live_matches_only=bool(raw.get("live_matches_only", cfg.live_matches_only)),
         trade_bitcoin=bool(raw.get("trade_bitcoin", cfg.trade_bitcoin)),
         trade_tennis=bool(raw.get("trade_tennis", cfg.trade_tennis)),
+        target_url=str(raw.get("target_url") or cfg.target_url),
+        target_event_ticker=str(raw.get("target_event_ticker") or cfg.target_event_ticker),
+        target_market_ticker=str(raw.get("target_market_ticker") or cfg.target_market_ticker),
+        target_label=str(raw.get("target_label") or cfg.target_label),
         live_enabled=False,
     )
 
@@ -372,6 +532,10 @@ def _persist_session(cfg: AppConfig, config_path: Path | None) -> dict[str, bool
         "live_matches_only": cfg.live_matches_only,
         "trade_bitcoin": cfg.trade_bitcoin,
         "trade_tennis": cfg.trade_tennis,
+        "target_url": cfg.target_url,
+        "target_event_ticker": cfg.target_event_ticker,
+        "target_market_ticker": cfg.target_market_ticker,
+        "target_label": cfg.target_label,
         "paper_mode": True,
         "live_enabled": False,
     }
@@ -514,6 +678,7 @@ def _status_payload(service: DashboardService) -> dict[str, Any]:
         "trade_bitcoin": service.cfg.trade_bitcoin,
         "trade_tennis": service.cfg.trade_tennis,
         "bitcoin_series_tickers": list(service.cfg.bitcoin_series_tickers),
+        "target": _target_payload(service.cfg),
         "run": service.controller.snapshot(),
     }
 
@@ -625,6 +790,17 @@ def create_app(
             raise HTTPException(status_code=409, detail="paper-run already in progress")
         if not body.trade_bitcoin and not body.trade_tennis:
             raise HTTPException(status_code=400, detail="select Bitcoin and/or tennis")
+        if body.target_url or body.target_event_ticker or body.target_market_ticker:
+            try:
+                service.set_contract(
+                    ContractRequest(
+                        url=body.target_url,
+                        event_ticker=body.target_event_ticker,
+                        market_ticker=body.target_market_ticker,
+                    )
+                )
+            except HTTPException:
+                raise
         session = service.apply_session(
             starting_cash=body.starting_cash,
             max_dollars_per_ticker=body.max_dollars_per_ticker,
@@ -649,6 +825,23 @@ def create_app(
     @app.post("/api/logs/clear")
     def clear_logs() -> dict[str, Any]:
         return service.controller.clear_logs()
+
+    @app.get("/api/contract")
+    def get_contract() -> dict[str, Any]:
+        return {
+            "paper_mode": True,
+            "live_enabled": False,
+            "target": _target_payload(service.cfg),
+            "examples": list(EXAMPLE_URLS),
+        }
+
+    @app.post("/api/contract")
+    def set_contract(body: ContractRequest) -> dict[str, Any]:
+        return service.set_contract(body)
+
+    @app.post("/api/clear")
+    def clear_session() -> dict[str, Any]:
+        return service.clear_session()
 
     return app
 

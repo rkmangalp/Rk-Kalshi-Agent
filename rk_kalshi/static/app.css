@@ -143,6 +143,56 @@ h1 {
   color: #ffd6d0;
 }
 
+.clear-btn {
+  min-width: 8rem;
+  padding: 0.75rem 1.2rem;
+  font-weight: 650;
+}
+
+.contract-box {
+  grid-column: 1 / -1;
+  display: grid;
+  gap: 0.55rem;
+  padding: 0.85rem 0.9rem;
+  border: 1px dashed var(--line);
+  border-radius: 10px;
+  background: var(--bg);
+}
+
+.contract-box h3 {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.contract-box label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.contract-box input,
+.contract-box select {
+  background: var(--bg-elev);
+  color: var(--ink);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 0.5rem 0.6rem;
+  font-family: var(--mono);
+  font-size: 0.78rem;
+}
+
+.contract-actions {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.examples code {
+  display: inline-block;
+  margin-top: 0.2rem;
+  word-break: break-all;
+}
+
 .start-form .fine { grid-column: 1 / -1; }
 .live-toggle { grid-column: 1 / -1; }
 .live-dot, .btc-dot {
