@@ -54,6 +54,7 @@
   let marketsTimer = null;
   let lastMarkets = null;
   let lastTarget = { active: false, event_ticker: "", market_ticker: "", label: "" };
+  let contractError = "";
   const pollMs = 700;
 
   async function fetchJSON(url, options) {
@@ -309,17 +310,7 @@
       label: (target && target.label) || "",
       url: (target && target.url) || "",
     };
-    if (els.contractStatus) {
-      if (!lastTarget.active) {
-        els.contractStatus.textContent = "No match selected — tennis can scan the full universe.";
-      } else if (lastTarget.market_ticker) {
-        els.contractStatus.textContent =
-          `Selected contract ${lastTarget.market_ticker} on ${lastTarget.event_ticker}. Paper tennis will use only this market.`;
-      } else {
-        els.contractStatus.textContent =
-          `Selected match ${lastTarget.label || lastTarget.event_ticker}. Paper tennis will use only this match’s contracts.`;
-      }
-    }
+    paintContractStatus();
     if (els.contractSelect && lastTarget.event_ticker) {
       const exists = Array.from(els.contractSelect.options).some((opt) => opt.value === lastTarget.event_ticker);
       if (!exists) {
@@ -336,6 +327,25 @@
       els.contractUrl.value = lastTarget.url;
     }
     if (lastMarkets) renderMarkets(lastMarkets);
+  }
+
+  function paintContractStatus() {
+    if (!els.contractStatus) return;
+    if (contractError) {
+      els.contractStatus.textContent = contractError;
+      els.contractStatus.classList.add("error");
+      return;
+    }
+    els.contractStatus.classList.remove("error");
+    if (!lastTarget.active) {
+      els.contractStatus.textContent = "No match selected — tennis can scan the full universe.";
+    } else if (lastTarget.market_ticker) {
+      els.contractStatus.textContent =
+        `Selected contract ${lastTarget.market_ticker} on ${lastTarget.event_ticker}. Paper tennis will use only this market.`;
+    } else {
+      els.contractStatus.textContent =
+        `Selected match ${lastTarget.label || lastTarget.event_ticker}. Paper tennis will use only this match’s contracts.`;
+    }
   }
 
   function populateContractSelect(payload) {
@@ -456,6 +466,8 @@
       if (payload.run) renderRun(payload.run);
     } catch (err) {
       els.log.textContent = `error: ${err.message}`;
+      contractError = err.message;
+      paintContractStatus();
       setRunEnabled(true);
     }
   }
@@ -490,6 +502,7 @@
   async function useContract() {
     const url = (els.contractUrl && els.contractUrl.value.trim()) || "";
     const eventTicker = (els.contractSelect && els.contractSelect.value) || "";
+    contractError = "";
     try {
       const payload = await fetchJSON("/api/contract", {
         method: "POST",
@@ -498,11 +511,13 @@
       });
       renderTarget(payload.target || {});
     } catch (err) {
-      if (els.contractStatus) els.contractStatus.textContent = err.message;
+      contractError = err.message;
+      paintContractStatus();
     }
   }
 
   async function clearContract() {
+    contractError = "";
     try {
       const payload = await fetchJSON("/api/contract", {
         method: "POST",
@@ -512,12 +527,14 @@
       if (els.contractUrl) els.contractUrl.value = "";
       renderTarget(payload.target || {});
     } catch (err) {
-      if (els.contractStatus) els.contractStatus.textContent = err.message;
+      contractError = err.message;
+      paintContractStatus();
     }
   }
 
   async function clearSession() {
     if (els.btnClearSession) els.btnClearSession.disabled = true;
+    contractError = "";
     try {
       const payload = await fetchJSON("/api/clear", { method: "POST" });
       if (els.contractUrl) els.contractUrl.value = "";
