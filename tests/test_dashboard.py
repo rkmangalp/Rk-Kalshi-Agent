@@ -113,6 +113,7 @@ class DashboardApiTests(unittest.TestCase):
         self.assertIn("no live orders", response.text)
         self.assertNotIn("Place live order", response.text)
         self.assertIn("Start paper trading", response.text)
+        self.assertIn("local time", response.text)
         self.assertIn("starting-cash", response.text)
         self.assertIn("btn-stop", response.text)
 
