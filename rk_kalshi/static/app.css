@@ -322,6 +322,11 @@ th {
 td { font-variant-numeric: tabular-nums; }
 .num { text-align: right; font-family: var(--mono); }
 .ticker { font-family: var(--mono); font-size: 0.74rem; }
+.when {
+  font-family: var(--mono);
+  font-size: 0.74rem;
+  white-space: nowrap;
+}
 .empty { color: var(--muted); text-align: center; }
 .error { color: var(--red); }
 
