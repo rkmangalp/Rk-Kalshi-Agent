@@ -310,6 +310,8 @@ class RunController:
                             f"  selected match {scan.get('target_event_ticker')} "
                             f"contracts={scan.get('targeted', 0)}"
                         )
+                    if scan.get("llm_note"):
+                        self._log(f"  ChatGPT: {scan.get('llm_note')}")
                     if (
                         self.cfg.trade_tennis
                         and self.cfg.live_matches_only

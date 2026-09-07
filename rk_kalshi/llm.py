@@ -136,7 +136,11 @@ class LlmResearchTrader:
             self.last_note = "no markets for ChatGPT"
             return []
 
-        decisions = self._decide(chosen_markets, inventory, as_signals, mode)
+        try:
+            decisions = self._decide(chosen_markets, inventory, as_signals, mode)
+        except (httpx.HTTPError, OSError, RuntimeError, json.JSONDecodeError, ValueError, TypeError) as exc:
+            self.last_note = f"ChatGPT request failed: {exc}"
+            return [] if mode == "llm" else as_signals
         self._last_call_ts = stamp
         if mode == "hybrid":
             return _apply_hybrid(as_signals, decisions, self.cfg.llm_model)
@@ -394,13 +398,21 @@ def _prompt_payload(
         "paper_only": True,
         "disclaimer": SIGNAL_DISCLAIMER,
         "instruction": (
-            "Return JSON {\"decisions\":[{\"ticker\",\"action\":\"buy|sell|skip\","
-            "\"edge_cents_estimate\",\"confidence\",\"thesis\"}]}. "
-            "action buy/sell means paper-trade YES. Use skip often. "
+            "Return JSON {\"decisions\":[{\"ticker\",\"side\":\"buy|sell|skip\","
+            "\"action\":\"buy|sell|skip\",\"edge_cents_estimate\",\"confidence\","
+            "\"thesis\"}]}. side and action are the same paper YES action "
+            "(buy/sell/skip). Use skip often. "
             "Anticipate likely tennis score/momentum swings (or short-horizon Bitcoin "
             "drift) and map that to YES/NO mid moves; do not only summarize current odds. "
             "Thesis must mention the anticipated path. Research is advisory only."
         ),
+        "target": {
+            "url": cfg.target_url,
+            "event_ticker": cfg.target_event_ticker,
+            "market_ticker": cfg.target_market_ticker,
+            "label": cfg.target_label,
+            "active": bool(cfg.target_event_ticker or cfg.target_market_ticker),
+        },
         "markets": rows,
     }
 
