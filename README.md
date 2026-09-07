@@ -258,8 +258,10 @@ Defaults live in `config.yaml`:
 | `signal.kappa` | `1.5` | Order-book imbalance weight (`obi_weight` alias) |
 | `signal.sigma_floor` | `0.04` | Minimum mid volatility in probability space |
 | `signal.use_ema_fallback` | `false` | Optional last-print / EMA fair when OBI and inventory are idle |
-| `signal.mode` | `hybrid` | `as_obi` (local), `hybrid`, or `llm` (ChatGPT; key from `.env`) |
-| `signal.llm_model` | `gpt-4o-mini` | OpenAI model for llm/hybrid paper research |
+| `signal.mode` | `hybrid` | `as_obi` (local default in code), `hybrid`, or `llm` (ChatGPT; key from `.env`) |
+| `signal.llm_model` | `gpt-4o-mini` | OpenAI model for llm/hybrid paper research (`gpt-4.1-mini` also fine) |
+| `signal.llm_min_interval_s` | `20` | Minimum seconds between ChatGPT calls |
+| `signal.llm_max_markets_per_call` | `6` | Cap markets sent to ChatGPT per cycle |
 | `kalshi.series_tickers` | `KXATPMATCH`, `KXWTAMATCH`, `KXITFWMATCH`, `KXITFMMATCH`, `KXATPCHALLENGERMATCH` | Match series |
 | `live.enabled` | `false` | Cannot enable the live stub |
 | `account.environment` | `prod` | Default demo/prod if `.env` omits `KALSHI_ENVIRONMENT` |
