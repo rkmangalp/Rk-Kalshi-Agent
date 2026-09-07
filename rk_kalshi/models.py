@@ -31,6 +31,9 @@ class MarketSnapshot:
     status: str = "open"
     series_ticker: str = ""
     occurrence_ts: Optional[float] = None
+    yes_bid_size: float = 0.0
+    yes_ask_size: float = 0.0
+    close_ts: Optional[float] = None
 
     def is_in_play(
         self,
@@ -71,6 +74,14 @@ class MarketSnapshot:
         if self.yes_bid <= 0 or self.yes_ask <= 0 or self.yes_ask < self.yes_bid:
             return None
         return (self.yes_ask - self.yes_bid) * 100.0
+
+    @property
+    def order_book_imbalance(self) -> float:
+        """(bid_size - ask_size) / (bid_size + ask_size); 0 when sizes missing."""
+        total = self.yes_bid_size + self.yes_ask_size
+        if total <= 0:
+            return 0.0
+        return (self.yes_bid_size - self.yes_ask_size) / total
 
 
 @dataclass(frozen=True)
@@ -169,6 +180,7 @@ class PaperState:
     kill_reason: str = ""
     positions: dict[str, Position] = field(default_factory=dict)
     ema: dict[str, float] = field(default_factory=dict)
+    mid_history: dict[str, list[float]] = field(default_factory=dict)
     last_trade: dict[str, LastTickerTrade] = field(default_factory=dict)
     daily_realized: float = 0.0
 

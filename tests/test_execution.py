@@ -32,8 +32,7 @@ class ExecutionTests(unittest.TestCase):
         live = LiveKalshiExecution(enabled=True)
         with self.assertRaises(LiveTradingDisabledError) as ctx:
             live.submit(_signal())
-        self.assertIn("RSA-PSS", str(ctx.exception))
-        self.assertIn("/portfolio/events/orders", str(ctx.exception))
+        self.assertIn("Live Kalshi execution is off", str(ctx.exception))
         with self.assertRaises(LiveTradingDisabledError):
             live.execute(_signal())
 

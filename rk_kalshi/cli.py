@@ -12,7 +12,7 @@ from rk_kalshi.models import MarketSnapshot
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="rk-kalshi",
-        description="Paper-trade Kalshi tennis markets. No live orders.",
+        description="Paper-trade Kalshi markets (Avellaneda–Stoikov + OBI). Live orders are dashboard opt-in only.",
     )
     parser.add_argument(
         "--config",
@@ -32,13 +32,13 @@ def main(argv: list[str] | None = None) -> int:
 
     sub.add_parser(
         "account",
-        help="Show connected Kalshi account portfolio (read-only; no live orders)",
+        help="Show connected Kalshi account portfolio (Connect is not live trading)",
     )
 
     dash = sub.add_parser(
         "dashboard",
         aliases=["serve"],
-        help="Local paper-trading web dashboard (localhost, no live orders)",
+        help="Local paper-trading web dashboard (localhost; live orders opt-in)",
     )
     dash.add_argument(
         "--host",
@@ -102,15 +102,17 @@ def _cmd_list(cfg) -> int:
 
 
 def _cmd_paper_run(cfg, cycles: int, sleep_s: float | None) -> int:
-    from rk_kalshi.execution import LiveKalshiExecution
+    from dataclasses import replace
+
     from rk_kalshi.runner import PaperRunner
 
     if cfg.live_enabled:
-        print("warning: live.enabled is ignored; LiveKalshiExecution stays disabled", file=sys.stderr)
-        try:
-            LiveKalshiExecution(enabled=True).submit()
-        except Exception as exc:  # noqa: BLE001 — surface the stub
-            print(f"live stub: {exc}", file=sys.stderr)
+        print(
+            "warning: CLI paper-run never places live orders. Enable Live from "
+            "the dashboard after Connect + confirmation.",
+            file=sys.stderr,
+        )
+    cfg = replace(cfg, live_enabled=False)
 
     runner = PaperRunner(cfg)
     try:
@@ -176,7 +178,8 @@ def _cmd_account(cfg) -> int:
         if status["status"] == "disconnected" and not status.get("api_key_id_suffix"):
             print(format_account_cli(None, status))
             print(
-                "not connected — set KALSHI_API_KEY_ID + KALSHI_PRIVATE_KEY_PATH in .env"
+                "not connected — set KALSHI_API_KEY_ID + KALSHI_PRIVATE_KEY_PATH "
+                "in a local .env (never paste keys in the dashboard)"
             )
             return 1
         try:

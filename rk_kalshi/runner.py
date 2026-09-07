@@ -2,9 +2,15 @@ from __future__ import annotations
 
 import time
 
+from rk_kalshi.catalog import filter_markets_by_category
 from rk_kalshi.client import KalshiPublicClient
 from rk_kalshi.config import AppConfig
-from rk_kalshi.execution import PaperExecution
+from rk_kalshi.execution import (
+    LiveKalshiExecution,
+    LiveOrderRejected,
+    LiveTradingDisabledError,
+    PaperExecution,
+)
 from rk_kalshi.journal import FillJournal
 from rk_kalshi.models import (
     Fill,
@@ -15,19 +21,32 @@ from rk_kalshi.models import (
     select_targeted_markets,
 )
 from rk_kalshi.risk import RiskManager
-from rk_kalshi.signal import TennisSignalEngine
+from rk_kalshi.signal import SignalEngine
+from rk_kalshi.llm import LlmResearchTrader
 from rk_kalshi.state import load_state, save_state
 
 
 class PaperRunner:
-    def __init__(self, cfg: AppConfig, client: KalshiPublicClient | None = None):
+    def __init__(
+        self,
+        cfg: AppConfig,
+        client: KalshiPublicClient | None = None,
+        llm: LlmResearchTrader | None = None,
+        signed_client=None,
+    ):
         self.cfg = cfg
         self.client = client or KalshiPublicClient(cfg)
         self.owns_client = client is None
-        self.signal = TennisSignalEngine(cfg)
+        self.signed_client = signed_client
+        self.signal = SignalEngine(cfg)
+        self.llm = llm if llm is not None else LlmResearchTrader(cfg)
         self.risk = RiskManager(cfg)
         self.paper = PaperExecution(cfg, self.risk)
+        self.live = LiveKalshiExecution(
+            cfg, self.risk, client=signed_client, enabled=bool(cfg.live_enabled)
+        )
         self.journal = FillJournal(cfg.fill_log_csv, cfg.fill_log_jsonl)
+        self.bind_execution()
         self.last_scan: dict = {
             "open": 0,
             "live": 0,
@@ -37,7 +56,19 @@ class PaperRunner:
             "targeted": 0,
             "target_event_ticker": "",
             "target_market_ticker": "",
+            "target_category_id": "",
         }
+
+    def bind_execution(self) -> None:
+        self.risk.cfg = self.cfg
+        self.paper.cfg = self.cfg
+        self.paper.risk = self.risk
+        self.live.cfg = self.cfg
+        self.live.risk = self.risk
+        self.live.client = self.signed_client
+        self.live.enabled = bool(self.cfg.live_enabled) and self.signed_client is not None
+        self.execution = self.live if self.cfg.live_enabled else self.paper
+        self.journal = FillJournal(self.cfg.fill_log_csv, self.cfg.fill_log_jsonl)
 
     def close(self) -> None:
         if self.owns_client:
@@ -54,6 +85,7 @@ class PaperRunner:
     def run_once(self) -> list[Fill]:
         state = load_state(self.cfg)
         self.signal.load_ema(state.ema)
+        self.signal.load_mids(state.mid_history)
         now = time.time()
         has_target = bool(self.cfg.target_event_ticker or self.cfg.target_market_ticker)
         targeted: list[MarketSnapshot] = []
@@ -98,6 +130,13 @@ class PaperRunner:
             }
         else:
             markets, latency_ms = self.client.list_markets()
+            if (self.cfg.target_category_id or "").strip() and self.cfg.target_category_id.lower() != "all":
+                markets = filter_markets_by_category(
+                    markets,
+                    self.cfg.target_category_id,
+                    near_money_low=self.cfg.bitcoin_near_money_low,
+                    near_money_high=self.cfg.bitcoin_near_money_high,
+                )
             tennis = [m for m in markets if m.asset_class == "tennis"]
             bitcoin = select_bitcoin_tradeable(
                 markets,
@@ -130,15 +169,22 @@ class PaperRunner:
         self.last_scan["targeted"] = len(targeted)
         self.last_scan["target_event_ticker"] = self.cfg.target_event_ticker
         self.last_scan["target_market_ticker"] = self.cfg.target_market_ticker
+        self.last_scan["target_category_id"] = self.cfg.target_category_id
         marks = {m.ticker: m.yes_mid for m in tradeable if m.yes_mid is not None}
         if self.risk.kill_switch_hit(state, marks):
             state.killed = True
             state.kill_reason = state.kill_reason or "daily loss kill-switch"
+            if self.cfg.live_enabled:
+                self.live.cancel_open()
             state.ema = self.signal.dump_ema()
+            state.mid_history = self.signal.dump_mids()
             save_state(self.cfg, state)
             return []
 
-        signals = self.signal.evaluate(tradeable)
+        as_signals = self.signal.evaluate(tradeable, inventory=state)
+        signals = self.llm.refine(tradeable, as_signals, inventory=state)
+        if self.llm.last_note:
+            self.last_scan["llm_note"] = self.llm.last_note
         taken: list[Fill] = []
         for signal in signals:
             if len(taken) >= self.cfg.max_signals_per_cycle:
@@ -149,6 +195,7 @@ class PaperRunner:
                 if state.killed:
                     break
         state.ema = self.signal.dump_ema()
+        state.mid_history = self.signal.dump_mids()
         save_state(self.cfg, state)
         return taken
 
@@ -162,6 +209,13 @@ class PaperRunner:
         decision = self.risk.approve(signal, state, marks)
         if not decision.ok:
             return None
-        fill = self.paper.execute(signal, state, decision.contracts, latency_ms, marks)
-        self.journal.append(fill)
+        try:
+            fill = self.execution.execute(signal, state, decision.contracts, latency_ms, marks)
+        except (LiveOrderRejected, LiveTradingDisabledError) as exc:
+            self.last_scan["live_error"] = str(exc)
+            return None
+        if fill.mode == "paper":
+            self.journal.append(fill)
+        if state.killed and self.cfg.live_enabled:
+            self.live.cancel_open()
         return fill

@@ -1,6 +1,7 @@
 # Paper-trading config for Kalshi tennis and Bitcoin markets.
-# Live order submission stays disabled. Do not size up until paper P&L
-# is positive on a large sample (see sizing.min_fills_before_size_up).
+# Live order placement is opt-in from the dashboard (Connect + confirmation)
+# with hard caps. Do not size up until paper P&L is positive on a large
+# sample (see sizing.min_fills_before_size_up).
 
 kalshi:
   base_url: https://external-api.kalshi.com/trade-api/v2
@@ -9,6 +10,8 @@ kalshi:
     - KXATPMATCH
     - KXWTAMATCH
     - KXITFWMATCH
+    - KXITFMMATCH
+    - KXATPCHALLENGERMATCH
   bitcoin_series_tickers:
     - KXBTC15M
     - KXBTCD
@@ -25,9 +28,10 @@ bankroll:
   starting_cash: 1000.0
 
 risk:
+  # Active paper mode default (Start panel can switch Safe→Aggressive).
   # Max dollars of exposure per market ticker (not per-contract price).
-  max_dollars_per_ticker: 200.0
-  daily_loss_limit: 500.0
+  max_dollars_per_ticker: 10.0
+  daily_loss_limit: 20.0
   # Martingale is forbidden in code even if this is flipped.
   allow_martingale: false
 
@@ -36,13 +40,30 @@ sizing:
   # fill_count >= min_fills_before_size_up AND running paper P&L > 0.
   allow_size_up: false
   min_fills_before_size_up: 200
-  base_contracts: 1
+  base_contracts: 2
 
 signal:
   # Net edge after half-spread + Kalshi quadratic fee, on a 0–100¢ scale.
   edge_threshold_cents: 3.0
   fee_coefficient: 0.07
   fee_multiplier: 1.0
+  # Avellaneda–Stoikov reservation: r = mid - q * gamma * sigma^2 * T_frac.
+  # There is no guaranteed profitable model; these knobs only change skew.
+  # Active-mode AS knobs (see Start panel trading modes).
+  gamma: 0.20
+  sigma_floor: 0.04
+  sigma_window: 32
+  t_frac_horizon_seconds: 14400
+  # Order-book imbalance weight (alias: obi_weight). tilt = kappa * OBI * spread.
+  kappa: 1.75
+  obi_tilt_cents: 2.0
+  # Optional last-print / EMA fair when inventory and OBI are both idle.
+  use_ema_fallback: false
+  # as_obi | hybrid (AS filters, ChatGPT confirms; default for research) | llm
+  mode: hybrid
+  llm_model: gpt-4o-mini
+  llm_min_interval_s: 20
+  llm_max_markets_per_call: 6
   ema_alpha: 0.30
   last_trade_weight: 0.50
   # Ignore last prints this far from mid — usually a stale tape, not edge.
@@ -59,8 +80,10 @@ paper:
   fill_log_csv: data/fills.csv
   fill_log_jsonl: data/fills.jsonl
   state_path: data/paper_state.json
-  cycle_sleep_s: 50.0
+  # Active mode poll (Start panel can change this).
+  cycle_sleep_s: 12.0
   max_signals_per_cycle: 8
+  trade_style: active
 
 account:
   # Read-only portfolio. Connect uses .env (KALSHI_API_KEY_ID +
@@ -68,6 +91,10 @@ account:
   environment: prod
 
 live:
-  # Must stay false. LiveKalshiExecution raises if called.
-  # Connecting an account does NOT enable this.
+  # Default off. Dashboard Live toggle is required even if this is true.
+  # CLI paper-run never posts orders. Hard ceilings live in code ($10/trade,
+  # $25 daily loss) and cannot be raised from this file.
   enabled: false
+  max_dollars_per_ticker: 5.0
+  daily_loss_limit: 10.0
+  state_path: data/live_state.json

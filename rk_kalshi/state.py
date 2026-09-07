@@ -45,6 +45,10 @@ def load_state(cfg: AppConfig) -> PaperState:
         killed=bool(raw.get("killed", False)),
         kill_reason=str(raw.get("kill_reason") or ""),
         ema={k: float(v) for k, v in (raw.get("ema") or {}).items()},
+        mid_history={
+            str(ticker): [float(v) for v in (values or [])]
+            for ticker, values in (raw.get("mid_history") or {}).items()
+        },
         daily_realized=float(raw.get("daily_realized", 0.0)),
     )
     for ticker, pos in (raw.get("positions") or {}).items():
@@ -85,6 +89,11 @@ def save_state(cfg: AppConfig, state: PaperState) -> None:
         "kill_reason": state.kill_reason,
         "daily_realized": state.daily_realized,
         "ema": state.ema,
+        "mid_history": {
+            ticker: [float(v) for v in values[-64:]]
+            for ticker, values in (state.mid_history or {}).items()
+            if values
+        },
         "positions": {
             ticker: {"contracts": pos.contracts, "avg_price": pos.avg_price}
             for ticker, pos in state.positions.items()

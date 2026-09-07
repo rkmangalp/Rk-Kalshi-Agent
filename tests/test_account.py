@@ -207,10 +207,12 @@ class ParserTests(unittest.TestCase):
 
 
 class FakeSignedClient:
-    def __init__(self, credentials, timeout_s: float = 15.0, client=None):
+    def __init__(self, credentials, timeout_s: float = 15.0, client=None, orders_enabled: bool = False):
         self.credentials = credentials
         self.closed = False
         self.calls: list[str] = []
+        self.created_orders: list[dict] = []
+        self.orders_enabled = bool(orders_enabled)
 
     def close(self) -> None:
         self.closed = True
@@ -267,7 +269,29 @@ class FakeSignedClient:
         raise AssertionError(path)
 
     def post(self, *args, **kwargs):
-        raise AccountApiError(LIVE_TRADING_MESSAGE)
+        if not self.orders_enabled:
+            raise AccountApiError(LIVE_TRADING_MESSAGE)
+        return {}, 1.0
+
+    def create_order(self, **kwargs):
+        if not self.orders_enabled:
+            raise AccountApiError(LIVE_TRADING_MESSAGE)
+        self.created_orders.append(kwargs)
+        contracts = kwargs.get("contracts", 1)
+        price = kwargs.get("price", 0.5)
+        return {
+            "order_id": "live-1",
+            "fill_count": f"{float(contracts):.2f}",
+            "remaining_count": "0.00",
+            "average_fill_price": f"{float(price):.4f}",
+            "average_fee_paid": "0.0100",
+            "ts_ms": 1,
+        }, 5.0
+
+    def cancel_order(self, order_id, ticker=None):
+        if not self.orders_enabled:
+            raise AccountApiError(LIVE_TRADING_MESSAGE)
+        return {"order_id": order_id, "reduced_by": "0.00", "ts_ms": 1}, 1.0
 
 
 class SignedClientHttpTests(unittest.TestCase):
@@ -298,9 +322,52 @@ class SignedClientHttpTests(unittest.TestCase):
         self.assertGreaterEqual(latency_ms, 0.0)
         with self.assertRaises(AccountApiError) as ctx:
             client.post("/portfolio/events/orders", json={})
-        self.assertIn("coming soon", str(ctx.exception))
+        self.assertIn("Live order placement is off", str(ctx.exception))
         with self.assertRaises(AccountApiError):
-            client.create_order()
+            client.create_order(ticker="T", side="buy", contracts=1, price=0.5)
+
+    def test_signed_create_order_posts_v2_path(self):
+        key = _rsa_key()
+        creds = _creds(key)
+        seen = {}
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            seen["method"] = request.method
+            seen["url"] = str(request.url)
+            seen["headers"] = dict(request.headers)
+            seen["body"] = request.content
+            path = "/trade-api/v2/portfolio/events/orders"
+            _verify(
+                key,
+                request.headers["KALSHI-ACCESS-TIMESTAMP"],
+                "POST",
+                path,
+                request.headers["KALSHI-ACCESS-SIGNATURE"],
+            )
+            return httpx.Response(
+                201,
+                json={
+                    "order_id": "ord-1",
+                    "fill_count": "1.00",
+                    "remaining_count": "0.00",
+                    "average_fill_price": "0.5600",
+                    "ts_ms": 1,
+                },
+            )
+
+        http = httpx.Client(transport=httpx.MockTransport(handler), base_url=DEMO_BASE_URL)
+        client = KalshiSignedClient(creds, client=http, orders_enabled=True)
+        payload, latency_ms = client.create_order(
+            ticker="HIGHNY-24JAN01-T60",
+            side="buy",
+            contracts=1,
+            price=0.56,
+        )
+        self.assertEqual(payload["order_id"], "ord-1")
+        self.assertGreaterEqual(latency_ms, 0.0)
+        self.assertEqual(seen["method"], "POST")
+        self.assertTrue(seen["url"].endswith("/portfolio/events/orders"))
+        self.assertIn("bid", seen["body"].decode("utf-8"))
 
     def test_unauthorized_is_sanitized(self):
         creds = _creds()
@@ -327,23 +394,27 @@ class AccountServiceTests(unittest.TestCase):
     def tearDown(self):
         self.tmp.cleanup()
 
-    def test_connect_from_env_loads_portfolio_without_writing_store(self):
+    def test_connect_from_local_loads_portfolio_without_writing_store(self):
         store_path = self.root / "kalshi_account.json"
         env = {
             "KALSHI_API_KEY_ID": "a952bcbe-ec3b-4b5b-b8f9-11dae589608c",
             "KALSHI_PRIVATE_KEY_PATH": str(self.key_path),
             "KALSHI_ENVIRONMENT": "demo",
         }
-        with patch("rk_kalshi.account.KalshiSignedClient", FakeSignedClient):
-            service = AccountService(store_path=store_path, load_env=False)
-            status = service.connect_from_env(env)
+        with patch.dict("os.environ", env, clear=False):
+            with patch("rk_kalshi.account.KalshiSignedClient", FakeSignedClient):
+                service = AccountService(store_path=store_path, load_env=False)
+                status = service.connect_from_local()
             self.assertEqual(status["status"], "connected")
             self.assertEqual(status["environment"], "demo")
             self.assertTrue(status["read_only"])
             self.assertFalse(status["live_trading_enabled"])
             self.assertIn("LIVE ACCOUNT VIEW", status["banner"])
             self.assertIn("DEMO", status["banner"])
-            self.assertFalse(store_path.exists())
+            if store_path.exists():
+                raw = store_path.read_text(encoding="utf-8")
+                self.assertNotIn("BEGIN", raw)
+                self.assertNotIn("PRIVATE KEY", raw)
             book = service.portfolio()
             self.assertAlmostEqual(book["balance"], 101.0)
             self.assertEqual(len(book["positions"]), 1)
@@ -356,12 +427,13 @@ class AccountServiceTests(unittest.TestCase):
             disconnected = service.disconnect()
             self.assertEqual(disconnected["status"], "disconnected")
 
-    def test_connect_from_env_requires_key_id_and_path(self):
-        from rk_kalshi.auth import MISSING_ENV_MESSAGE
+    def test_connect_from_local_requires_key_id_and_path(self):
+        from rk_kalshi.account import MISSING_ENV_MESSAGE
 
         service = AccountService(store_path=self.root / "kalshi_account.json", load_env=False)
-        with self.assertRaises(AccountAuthError) as ctx:
-            service.connect_from_env({})
+        with patch("rk_kalshi.account.credentials_from_env", return_value=None):
+            with self.assertRaises(AccountAuthError) as ctx:
+                service.connect_from_local()
         self.assertEqual(str(ctx.exception), MISSING_ENV_MESSAGE)
         self.assertEqual(service.snapshot()["status"], "error")
 
@@ -372,33 +444,63 @@ class AccountServiceTests(unittest.TestCase):
             def get_json(self, path, params=None):
                 raise AccountApiError("Kalshi rejected the signed request")
 
-        with patch("rk_kalshi.account.KalshiSignedClient", Boom):
-            service = AccountService(store_path=store_path, load_env=False)
-            with self.assertRaises(AccountApiError):
-                service.connect_from_env(
-                    {
-                        "KALSHI_API_KEY_ID": "abcd1234",
-                        "KALSHI_PRIVATE_KEY_PATH": str(self.key_path),
-                        "KALSHI_ENVIRONMENT": "demo",
-                    }
-                )
-            snap = service.snapshot()
-            self.assertEqual(snap["status"], "error")
-            self.assertEqual(snap["environment"], "demo")
-            self.assertIn("rejected", snap["message"])
+        env = {
+            "KALSHI_API_KEY_ID": "abcd1234",
+            "KALSHI_PRIVATE_KEY_PATH": str(self.key_path),
+            "KALSHI_ENVIRONMENT": "demo",
+        }
+        with patch.dict("os.environ", env, clear=False):
+            with patch("rk_kalshi.account.KalshiSignedClient", Boom):
+                service = AccountService(store_path=store_path, load_env=False)
+                with self.assertRaises(AccountApiError):
+                    service.connect_from_local()
+                snap = service.snapshot()
+                self.assertEqual(snap["status"], "error")
+                self.assertEqual(snap["environment"], "demo")
+                self.assertIn("rejected", snap["message"])
         self.assertFalse(store_path.exists())
 
         missing = AccountService(store_path=self.root / "other.json", load_env=False)
-        with self.assertRaises(AccountAuthError):
-            missing.connect_from_env(
-                {
-                    "KALSHI_API_KEY_ID": "abcd1234",
-                    "KALSHI_PRIVATE_KEY_PATH": str(self.root / "nope.key"),
-                    "KALSHI_ENVIRONMENT": "prod",
-                }
-            )
+        with patch.dict(
+            "os.environ",
+            {
+                "KALSHI_API_KEY_ID": "abcd1234",
+                "KALSHI_PRIVATE_KEY_PATH": str(self.root / "nope.key"),
+                "KALSHI_ENVIRONMENT": "prod",
+            },
+            clear=False,
+        ):
+            with self.assertRaises(AccountAuthError):
+                missing.connect_from_local()
         self.assertEqual(missing.snapshot()["status"], "error")
         self.assertIn("not found", missing.snapshot()["message"])
+
+    def test_connect_from_local_uses_env_and_missing_message(self):
+        from rk_kalshi.account import MISSING_ENV_MESSAGE
+
+        store_path = self.root / "kalshi_account.json"
+        empty = AccountService(store_path=store_path, load_env=False)
+        with patch("rk_kalshi.account.credentials_from_env", return_value=None):
+            with self.assertRaises(AccountAuthError) as ctx:
+                empty.connect_from_local()
+        self.assertIn(".env", str(ctx.exception))
+        self.assertIn("never paste", str(ctx.exception).lower())
+        self.assertEqual(empty.snapshot()["status"], "error")
+        self.assertIn("never paste", empty.snapshot()["message"].lower())
+        self.assertIn("never paste", MISSING_ENV_MESSAGE.lower())
+
+        env = {
+            "KALSHI_API_KEY_ID": "a952bcbe-ec3b-4b5b-b8f9-11dae589608c",
+            "KALSHI_PRIVATE_KEY_PATH": str(self.key_path),
+            "KALSHI_ENVIRONMENT": "demo",
+        }
+        with patch.dict("os.environ", env, clear=False):
+            with patch("rk_kalshi.account.KalshiSignedClient", FakeSignedClient):
+                service = AccountService(store_path=store_path, load_env=False)
+                status = service.connect_from_local()
+        self.assertEqual(status["status"], "connected")
+        self.assertEqual(status["environment"], "demo")
+        self.assertFalse(status["live_trading_enabled"])
 
 
 if __name__ == "__main__":

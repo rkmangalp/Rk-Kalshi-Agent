@@ -7,7 +7,13 @@ from typing import Any
 import yaml
 
 
-DEFAULT_SERIES = ("KXATPMATCH", "KXWTAMATCH", "KXITFWMATCH")
+DEFAULT_SERIES = (
+    "KXATPMATCH",
+    "KXWTAMATCH",
+    "KXITFWMATCH",
+    "KXITFMMATCH",
+    "KXATPCHALLENGERMATCH",
+)
 DEFAULT_BITCOIN_SERIES = ("KXBTC15M", "KXBTCD")
 DEFAULT_BASE_URL = "https://external-api.kalshi.com/trade-api/v2"
 
@@ -39,6 +45,19 @@ class AppConfig:
     max_spread_cents: float = 8.0
     stale_mid_seconds: float = 180.0
     min_volume: float = 0.0
+    gamma: float = 0.25
+    kappa: float = 1.5
+    sigma_floor: float = 0.04
+    sigma_window: int = 32
+    t_frac_horizon_seconds: float = 14400.0
+    obi_tilt_cents: float = 2.0
+    use_ema_fallback: bool = False
+    signal_mode: str = "as_obi"
+    trade_style: str = "active"
+    target_category_id: str = ""
+    llm_model: str = "gpt-4o-mini"
+    llm_min_interval_s: float = 20.0
+    llm_max_markets_per_call: int = 6
     live_matches_only: bool = True
     live_pre_start_minutes: float = 10.0
     live_max_hours: float = 12.0
@@ -48,6 +67,9 @@ class AppConfig:
     cycle_sleep_s: float = 15.0
     max_signals_per_cycle: int = 8
     live_enabled: bool = False
+    live_state_path: Path = Path("data/live_state.json")
+    live_max_dollars_per_ticker: float = 5.0
+    live_daily_loss_limit: float = 10.0
     account_environment: str = "prod"
     target_url: str = ""
     target_event_ticker: str = ""
@@ -69,6 +91,17 @@ class AppConfig:
             seen.add(ticker)
             unique.append(ticker)
         return tuple(unique)
+
+
+def _signal_mode(value: object) -> str:
+    text = str(value or "as_obi").strip().lower().replace("-", "_")
+    if text in {"as_obi", "asobi", "as"}:
+        return "as_obi"
+    if text in {"llm", "openai", "chatgpt"}:
+        return "llm"
+    if text in {"hybrid", "as_llm"}:
+        return "hybrid"
+    return "as_obi"
 
 
 def load_config(path: str | Path | None = None) -> AppConfig:
@@ -116,6 +149,19 @@ def config_from_mapping(raw: dict[str, Any]) -> AppConfig:
         max_spread_cents=float(signal.get("max_spread_cents", 8.0)),
         stale_mid_seconds=float(signal.get("stale_mid_seconds", 180.0)),
         min_volume=float(signal.get("min_volume", 0.0)),
+        gamma=float(signal.get("gamma", 0.25)),
+        kappa=float(signal.get("kappa", signal.get("obi_weight", 1.5))),
+        sigma_floor=float(signal.get("sigma_floor", 0.04)),
+        sigma_window=max(2, int(signal.get("sigma_window", 32))),
+        t_frac_horizon_seconds=float(signal.get("t_frac_horizon_seconds", 14400.0)),
+        obi_tilt_cents=float(signal.get("obi_tilt_cents", 2.0)),
+        use_ema_fallback=bool(signal.get("use_ema_fallback", False)),
+        signal_mode=_signal_mode(signal.get("mode", signal.get("signal_mode", "as_obi"))),
+        trade_style=str(paper.get("trade_style") or signal.get("trade_style") or "active"),
+        target_category_id=str(kalshi.get("target_category_id") or ""),
+        llm_model=str(signal.get("llm_model") or "gpt-4o-mini"),
+        llm_min_interval_s=float(signal.get("llm_min_interval_s", 20.0)),
+        llm_max_markets_per_call=max(1, int(signal.get("llm_max_markets_per_call", 6))),
         live_matches_only=bool(signal.get("live_matches_only", True)),
         live_pre_start_minutes=float(signal.get("live_pre_start_minutes", 10.0)),
         live_max_hours=float(signal.get("live_max_hours", 12.0)),
@@ -125,5 +171,8 @@ def config_from_mapping(raw: dict[str, Any]) -> AppConfig:
         cycle_sleep_s=float(paper.get("cycle_sleep_s", 15.0)),
         max_signals_per_cycle=int(paper.get("max_signals_per_cycle", 8)),
         live_enabled=bool(live.get("enabled", False)),
+        live_state_path=Path(live.get("state_path", "data/live_state.json")),
+        live_max_dollars_per_ticker=float(live.get("max_dollars_per_ticker", 5.0)),
+        live_daily_loss_limit=float(live.get("daily_loss_limit", 10.0)),
         account_environment=str(account.get("environment") or "prod"),
     )

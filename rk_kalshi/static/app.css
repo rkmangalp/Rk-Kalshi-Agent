@@ -89,6 +89,11 @@ h1 {
   font-weight: 650;
 }
 
+#signal-note {
+  margin: 0.35rem 0 0;
+  max-width: 42rem;
+}
+
 .top-meta { display: flex; gap: 0.5rem; flex-wrap: wrap; }
 
 .pill {
@@ -135,6 +140,30 @@ h1 {
   grid-column: 1 / -1;
   display: flex;
   gap: 0.65rem;
+}
+
+.paper-banner.is-live {
+  background: #8b1e1e;
+  color: #ffe8e4;
+}
+
+.live-arm {
+  grid-column: 1 / -1;
+  display: grid;
+  gap: 0.45rem;
+  padding: 0.7rem 0.8rem;
+  border: 1px solid #5a2a24;
+  border-radius: 8px;
+  background: #241614;
+}
+
+.live-warning {
+  color: #f0b4aa !important;
+}
+
+.live-start {
+  background: #c45c4c !important;
+  color: #2a0c0a !important;
 }
 
 .coming-soon {
@@ -290,10 +319,24 @@ h1 {
   font-size: 0.78rem;
 }
 
-.contract-actions {
+.catalog-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.75rem;
+}
+
+.catalog-row label {
   display: flex;
-  gap: 0.5rem;
-  flex-wrap: wrap;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+#trade-style-hint {
+  color: var(--lock);
+}
+
+@media (max-width: 720px) {
+  .catalog-row { grid-template-columns: 1fr; }
 }
 
 .examples code {
@@ -516,3 +559,151 @@ footer {
   .top { flex-direction: column; align-items: flex-start; }
   .start-form, .account-form { grid-template-columns: 1fr; }
 }
+
+/* Paper vs Live desks: same controls, different chrome. Hidden panels keep
+   their original display when shown, so hide with the opposite body class. */
+body.desk-paper .live-only { display: none !important; }
+body.desk-live .paper-only { display: none !important; }
+body.desk-live .grid { grid-template-columns: 1fr; }
+
+.desk-switch {
+  display: inline-flex;
+  border: 2px solid var(--line);
+  border-radius: 999px;
+  overflow: hidden;
+  background: var(--bg);
+}
+
+.desk-switch button {
+  border: 0;
+  border-radius: 0;
+  min-width: 6.4rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  background: transparent;
+  color: var(--muted);
+}
+
+.desk-switch [data-desk="paper"].is-on {
+  background: var(--amber);
+  color: var(--amber-ink);
+}
+
+.desk-switch [data-desk="live"].is-on {
+  background: #6a2420;
+  color: #ffd6d0;
+}
+
+body.desk-live {
+  --bg: #1a1010;
+  --bg-elev: #241414;
+  --bg-panel: #2a1614;
+  --line: #5a3330;
+  --ink: #ffe8e4;
+  --muted: #c4a09a;
+  --primary: #e07a6a;
+  --primary-ink: #2a0c0a;
+  --btn: #3a2220;
+  --btn-ink: #ffe8e4;
+  background:
+    linear-gradient(180deg, rgba(196, 69, 60, 0.22), transparent 160px),
+    var(--bg);
+}
+
+body.desk-live .banner.paper-banner,
+body.desk-live #mode-banner {
+  background: #8b1e1e;
+  color: #fff3f0;
+  letter-spacing: 0.12em;
+  box-shadow: 0 0 0 3px rgba(196, 69, 60, 0.35);
+}
+
+body.desk-live .start-panel {
+  border-color: #8a4540;
+  box-shadow: 0 0 0 1px rgba(224, 122, 106, 0.28);
+}
+
+body.desk-live .account-panel,
+body.desk-live .live-trades {
+  border-color: #8a4540;
+  box-shadow: 0 0 0 1px rgba(224, 122, 106, 0.2);
+}
+
+body.desk-live .start-btn.live-start,
+body.desk-live button.live-start {
+  background: #c45c4c !important;
+  color: #2a0c0a !important;
+  border-color: #e07a6a;
+}
+
+.live-desk-stamp {
+  margin: 0;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  color: #ffb3ab;
+  text-transform: uppercase;
+  font-size: 0.78rem;
+}
+
+.cancel-open-btn {
+  background: #5a2c28;
+  border-color: #8a4540;
+  color: #ffd6d0;
+  font-weight: 700;
+}
+
+.desk-gate {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: grid;
+  place-items: center;
+  background: rgba(10, 6, 6, 0.72);
+  padding: 1.2rem;
+}
+
+.desk-gate[hidden] { display: none !important; }
+
+.desk-gate-card {
+  width: min(34rem, 100%);
+  background: #241414;
+  color: #ffe8e4;
+  border: 2px solid #c45c4c;
+  border-radius: 14px;
+  padding: 1.15rem 1.2rem 1.2rem;
+  display: grid;
+  gap: 0.75rem;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.45);
+}
+
+.desk-gate-card h2 {
+  margin: 0;
+  color: #ffb3ab;
+  text-transform: none;
+  letter-spacing: 0;
+  font-size: 1.25rem;
+}
+
+.desk-gate-card .lede { color: #c4a09a; margin: 0; }
+
+.desk-gate-card label.inline {
+  color: #ffe8e4;
+}
+
+.desk-gate-actions {
+  display: flex;
+  gap: 0.65rem;
+  flex-wrap: wrap;
+}
+
+#desk-gate-confirm {
+  display: grid;
+  gap: 0.45rem;
+  padding: 0.7rem 0.8rem;
+  border: 1px solid #5a2a24;
+  border-radius: 8px;
+  background: #1a1010;
+}
+
+#desk-gate-confirm[hidden] { display: none !important; }

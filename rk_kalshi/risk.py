@@ -2,12 +2,14 @@
 
 Sizing up stays locked unless allow_size_up is on, fill count is large,
 and paper P&L is already positive. Defaults keep that gate closed.
+Live path clamps dollar/daily-loss caps to hard ceilings in live_caps.
 """
 
 from __future__ import annotations
 
 from rk_kalshi.config import AppConfig
 from rk_kalshi.fees import quadratic_fee_dollars
+from rk_kalshi.live_caps import clamp_live_daily_loss, clamp_live_dollars
 from rk_kalshi.models import PaperState, RiskDecision, Signal
 
 
@@ -15,7 +17,21 @@ class RiskManager:
     def __init__(self, cfg: AppConfig):
         self.cfg = cfg
 
+    def max_dollars_per_ticker(self) -> float:
+        cap = float(self.cfg.max_dollars_per_ticker)
+        if self.cfg.live_enabled:
+            return clamp_live_dollars(cap)
+        return cap
+
+    def daily_loss_limit(self) -> float:
+        limit = float(self.cfg.daily_loss_limit)
+        if self.cfg.live_enabled:
+            return clamp_live_daily_loss(limit)
+        return limit
+
     def can_size_up(self, state: PaperState) -> bool:
+        if self.cfg.live_enabled:
+            return False
         if not self.cfg.allow_size_up:
             return False
         if state.fill_count < self.cfg.min_fills_before_size_up:
@@ -27,7 +43,7 @@ class RiskManager:
     def kill_switch_hit(self, state: PaperState, marks: dict[str, float] | None = None) -> bool:
         if state.killed:
             return True
-        if state.daily_pnl(marks) <= -abs(self.cfg.daily_loss_limit):
+        if state.daily_pnl(marks) <= -abs(self.daily_loss_limit()):
             return True
         return False
 
@@ -49,6 +65,7 @@ class RiskManager:
             requested = min(requested, self.cfg.base_contracts)
 
         price = signal.fill_price
+        ticker_cap = self.max_dollars_per_ticker()
         contracts = requested
         while contracts > 0:
             fee = quadratic_fee_dollars(
@@ -59,7 +76,7 @@ class RiskManager:
             )
             order_notional = contracts * price + fee
             existing = _signed_exposure(state, signal.ticker, price, signal.side, contracts)
-            if existing > self.cfg.max_dollars_per_ticker + 1e-9:
+            if existing > ticker_cap + 1e-9:
                 contracts -= 1
                 continue
             if signal.side == "buy" and state.cash + 1e-9 < order_notional:
