@@ -133,6 +133,14 @@ class DashboardApiTests(unittest.TestCase):
         self.assertIn("Paste any Kalshi market or event URL", response.text)
         self.assertIn("Contract / match", response.text)
         self.assertIn("not a live Kalshi account", response.text)
+        self.assertIn("Connect to see live trades", response.text)
+        self.assertIn("btn-connect", response.text)
+        self.assertIn("live-trades-panel", response.text)
+        self.assertIn("Enable live trading (coming soon)", response.text)
+        self.assertIn("account-banner", response.text)
+        self.assertIn("Live account view", response.text)
+        self.assertIn("paper desk", response.text.lower())
+        self.assertIn("account-key-id", response.text)
 
     def test_health_and_status_lock_paper_mode(self):
         health = self.http.get("/api/health")
@@ -150,7 +158,10 @@ class DashboardApiTests(unittest.TestCase):
         self.assertFalse(body["allow_size_up"])
         self.assertEqual(body["min_fills_before_size_up"], 200)
         self.assertFalse(body["killed"])
-        self.assertEqual(body["banner"], "PAPER MODE ONLY — no live orders")
+        self.assertIn("PAPER MODE ONLY", body["banner"])
+        self.assertIn("no live orders", body["banner"])
+        self.assertEqual(body["account"]["status"], "disconnected")
+        self.assertFalse(body["account"]["live_trading_enabled"])
         self.assertAlmostEqual(body["starting_cash"], 100.0)
         self.assertAlmostEqual(body["max_dollars_per_ticker"], 5.0)
         self.assertAlmostEqual(body["daily_loss_limit"], 15.0)
@@ -325,6 +336,10 @@ class DashboardApiTests(unittest.TestCase):
         with patch("rk_kalshi.cli._cmd_list", return_value=0) as listed:
             self.assertEqual(main(["list-tennis-markets"]), 0)
             listed.assert_called_once()
+
+        with patch("rk_kalshi.cli._cmd_account", return_value=0) as account:
+            self.assertEqual(main(["account"]), 0)
+            account.assert_called_once()
 
     def test_start_applies_paper_bankroll_and_rejects_live(self):
         from rk_kalshi.state import load_state
@@ -506,6 +521,65 @@ class DashboardApiTests(unittest.TestCase):
         self.assertAlmostEqual(state.cash, self.cfg.starting_cash)
         logs = wiped.json()["run"]["logs"]
         self.assertTrue(any("paper session cleared" in line for line in logs))
+
+    def test_account_connect_is_read_only_and_rejects_live_trading(self):
+        from tests.test_account import FakeSignedClient, _pem, _rsa_key
+        from unittest.mock import patch
+
+        live = self.http.post(
+            "/api/account/connect",
+            json={
+                "api_key_id": "abcd",
+                "private_key_pem": "x",
+                "enable_live_trading": True,
+            },
+        )
+        self.assertEqual(live.status_code, 422)
+
+        live_mode = self.http.post(
+            "/api/account/connect",
+            json={"api_key_id": "abcd", "private_key_pem": "x", "mode": "live"},
+        )
+        self.assertEqual(live_mode.status_code, 422)
+
+        missing = self.http.get("/api/account/portfolio")
+        self.assertEqual(missing.status_code, 409)
+
+        key = _rsa_key()
+        with patch("rk_kalshi.account.KalshiSignedClient", FakeSignedClient):
+            connected = self.http.post(
+                "/api/account/connect",
+                json={
+                    "environment": "demo",
+                    "api_key_id": "a952bcbe-ec3b-4b5b-b8f9-11dae589608c",
+                    "private_key_pem": _pem(key),
+                    "enable_live_trading": False,
+                    "mode": "paper",
+                },
+            )
+        self.assertEqual(connected.status_code, 200)
+        body = connected.json()
+        self.assertFalse(body["live_enabled"])
+        self.assertTrue(body["read_only"])
+        self.assertEqual(body["account"]["status"], "connected")
+        self.assertIn("read-only", body["note"].lower())
+
+        book = self.http.get("/api/account/portfolio")
+        self.assertEqual(book.status_code, 200)
+        portfolio = book.json()
+        self.assertAlmostEqual(portfolio["balance"], 101.0)
+        self.assertEqual(portfolio["positions"][0]["ticker"], "KX-OPEN")
+        self.assertFalse(portfolio["live_enabled"])
+
+        status = self.http.get("/api/status").json()
+        self.assertEqual(status["account"]["status"], "connected")
+        self.assertFalse(status["live_enabled"])
+        self.assertFalse(status["live_trading_available"])
+
+        gone = self.http.post("/api/account/disconnect")
+        self.assertEqual(gone.status_code, 200)
+        self.assertEqual(gone.json()["account"]["status"], "disconnected")
+        self.assertFalse(gone.json()["live_enabled"])
 
 
 if __name__ == "__main__":
