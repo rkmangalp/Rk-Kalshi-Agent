@@ -141,6 +141,8 @@ class DashboardApiTests(unittest.TestCase):
         self.assertIn("Live account view", response.text)
         self.assertIn("paper desk", response.text.lower())
         self.assertIn("account-key-id", response.text)
+        self.assertIn("account-key-pem", response.text)
+        self.assertIn("Leave blank if using a file path.", response.text)
 
     def test_health_and_status_lock_paper_mode(self):
         health = self.http.get("/api/health")
@@ -558,6 +560,23 @@ class DashboardApiTests(unittest.TestCase):
         errored = self.http.get("/api/account").json()
         self.assertEqual(errored["status"], "error")
         self.assertIn("not found", errored["message"])
+
+        key_path = Path(self.tmp.name) / "kalshi.key"
+        key_path.write_text(_pem(_rsa_key()), encoding="utf-8")
+        with patch("rk_kalshi.account.KalshiSignedClient", FakeSignedClient):
+            path_and_stub = self.http.post(
+                "/api/account/connect",
+                json={
+                    "environment": "demo",
+                    "api_key_id": "a952bcbe-ec3b-4b5b-b8f9-11dae589608c",
+                    "private_key_path": str(key_path),
+                    "private_key_pem": "-----BEGIN RSA PRIVATE KEY-----",
+                    "enable_live_trading": False,
+                    "mode": "paper",
+                },
+            )
+        self.assertEqual(path_and_stub.status_code, 200)
+        self.assertEqual(path_and_stub.json()["account"]["status"], "connected")
 
         key = _rsa_key()
         with patch("rk_kalshi.account.KalshiSignedClient", FakeSignedClient):

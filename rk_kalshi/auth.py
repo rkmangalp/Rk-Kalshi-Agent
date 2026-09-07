@@ -156,6 +156,22 @@ class KalshiCredentials:
         }
 
 
+INCOMPLETE_PEM_MESSAGE = "paste the full PEM including END line, or use a file path"
+
+
+def pem_is_complete(pem: str | None) -> bool:
+    """True when text has matching BEGIN/END private-key lines (not BEGIN-only)."""
+    text = (pem or "").strip()
+    if not text:
+        return False
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    begin = any(
+        line.upper().startswith("-----BEGIN") and "PRIVATE KEY" in line.upper() for line in lines
+    )
+    end = any(line.upper().startswith("-----END") and "PRIVATE KEY" in line.upper() for line in lines)
+    return begin and end
+
+
 def credentials_from_parts(
     api_key_id: str,
     *,
@@ -169,12 +185,18 @@ def credentials_from_parts(
         raise AccountAuthError("API Key ID is required")
     pem = (private_key_pem or "").strip()
     path = str(private_key_path or "").strip()
-    if pem:
+    path_exists = bool(path) and Path(path).expanduser().is_file()
+    if path_exists:
+        key = load_private_key_file(path)
+        stored_path = path
+    elif pem_is_complete(pem):
         key = load_private_key(pem)
         stored_path = ""
     elif path:
         key = load_private_key_file(path)
         stored_path = path
+    elif pem:
+        raise AccountAuthError(INCOMPLETE_PEM_MESSAGE)
     else:
         raise AccountAuthError("provide a private key file path or paste the PEM key")
     env = normalize_environment(environment)

@@ -26,12 +26,14 @@ from rk_kalshi.account import (
 )
 from rk_kalshi.auth import (
     DEMO_BASE_URL,
+    INCOMPLETE_PEM_MESSAGE,
     AccountAuthError,
     KalshiCredentials,
     auth_headers,
     credentials_from_env,
     credentials_from_parts,
     mask_key_id,
+    pem_is_complete,
     sign_pss,
     signing_path,
 )
@@ -116,6 +118,34 @@ class SigningTests(unittest.TestCase):
         self.assertIsNone(credentials_from_env({}))
         with self.assertRaises(AccountAuthError):
             credentials_from_parts("", private_key_pem=_pem(key))
+
+    def test_existing_key_file_wins_over_begin_only_pem(self):
+        key = _rsa_key()
+        stub = "-----BEGIN RSA PRIVATE KEY-----"
+        self.assertFalse(pem_is_complete(stub))
+        self.assertTrue(pem_is_complete(_pem(key)))
+        with TemporaryDirectory() as tmp:
+            path = Path(tmp) / "kalshi.key"
+            path.write_text(_pem(key), encoding="utf-8")
+            creds = credentials_from_parts(
+                "abc-1234",
+                environment="demo",
+                private_key_path=str(path),
+                private_key_pem=stub,
+            )
+            self.assertEqual(creds.key_path, str(path))
+            with self.assertRaises(AccountAuthError) as ctx:
+                credentials_from_parts("abc-1234", private_key_pem=stub)
+            self.assertEqual(str(ctx.exception), INCOMPLETE_PEM_MESSAGE)
+            missing = Path(tmp) / "missing.key"
+            with self.assertRaises(AccountAuthError) as missing_ctx:
+                credentials_from_parts(
+                    "abc-1234",
+                    private_key_path=str(missing),
+                    private_key_pem=stub,
+                )
+            self.assertIn("not found", str(missing_ctx.exception))
+            self.assertNotIn("provide a private key file path or paste", str(missing_ctx.exception))
 
 
 class ParserTests(unittest.TestCase):
