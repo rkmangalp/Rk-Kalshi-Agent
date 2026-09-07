@@ -356,8 +356,18 @@ class AccountServiceTests(unittest.TestCase):
         with patch("rk_kalshi.account.KalshiSignedClient", Boom):
             service = AccountService(store_path=store_path, load_env=False)
             with self.assertRaises(AccountApiError):
-                service.connect("abcd1234", private_key_path=str(self.key_path))
+                service.connect("abcd1234", environment="demo", private_key_path=str(self.key_path))
+            snap = service.snapshot()
+            self.assertEqual(snap["status"], "error")
+            self.assertEqual(snap["environment"], "demo")
+            self.assertIn("rejected", snap["message"])
         self.assertFalse(store_path.exists())
+
+        missing = AccountService(store_path=self.root / "other.json", load_env=False)
+        with self.assertRaises(AccountAuthError):
+            missing.connect("abcd1234", environment="prod", private_key_path=str(self.root / "nope.key"))
+        self.assertEqual(missing.snapshot()["status"], "error")
+        self.assertIn("not found", missing.snapshot()["message"])
 
 
 if __name__ == "__main__":

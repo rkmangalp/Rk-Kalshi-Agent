@@ -364,18 +364,25 @@ class AccountService:
         private_key_pem: str | None = None,
     ) -> dict[str, Any]:
         persist_pem = bool((private_key_pem or "").strip()) and not (private_key_path or "").strip()
-        creds = credentials_from_parts(
-            api_key_id,
-            environment=environment,
-            private_key_path=private_key_path,
-            private_key_pem=private_key_pem,
-        )
+        try:
+            creds = credentials_from_parts(
+                api_key_id,
+                environment=environment,
+                private_key_path=private_key_path,
+                private_key_pem=private_key_pem,
+            )
+        except AccountAuthError as exc:
+            with self._lock:
+                self._mark_error(str(exc), environment=environment, api_key_id_suffix=mask_key_id(api_key_id))
+            raise
         client = KalshiSignedClient(creds, timeout_s=self.timeout_s)
         try:
             payload, latency_ms = client.get_json("/portfolio/balance")
             parse_balance(payload)
-        except Exception:
+        except Exception as exc:
             client.close()
+            with self._lock:
+                self._mark_error(str(exc), environment=creds.environment, api_key_id_suffix=mask_key_id(creds.api_key_id))
             raise
         self.store.save(creds, persist_pem=persist_pem)
         if persist_pem:
@@ -527,13 +534,19 @@ class AccountService:
             latency_ms=round(float(latency_ms), 3),
         )
 
-    def _mark_error(self, message: str) -> None:
+    def _mark_error(
+        self,
+        message: str,
+        *,
+        environment: str | None = None,
+        api_key_id_suffix: str | None = None,
+    ) -> None:
         current = self._snapshot
         self._snapshot = AccountSnapshot(
             status="error",
-            environment=current.environment,
+            environment=environment or current.environment,
             base_url=current.base_url,
-            api_key_id_suffix=current.api_key_id_suffix,
+            api_key_id_suffix=api_key_id_suffix if api_key_id_suffix is not None else current.api_key_id_suffix,
             key_path=current.key_path,
             message=message,
             last_ok_at=current.last_ok_at,

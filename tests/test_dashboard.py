@@ -545,6 +545,20 @@ class DashboardApiTests(unittest.TestCase):
         missing = self.http.get("/api/account/portfolio")
         self.assertEqual(missing.status_code, 409)
 
+        bad_path = self.http.post(
+            "/api/account/connect",
+            json={
+                "environment": "demo",
+                "api_key_id": "test-key-id-1234",
+                "private_key_path": r"C:\Users\Rk\.kalshi\missing.key",
+                "mode": "paper",
+            },
+        )
+        self.assertEqual(bad_path.status_code, 400)
+        errored = self.http.get("/api/account").json()
+        self.assertEqual(errored["status"], "error")
+        self.assertIn("not found", errored["message"])
+
         key = _rsa_key()
         with patch("rk_kalshi.account.KalshiSignedClient", FakeSignedClient):
             connected = self.http.post(
