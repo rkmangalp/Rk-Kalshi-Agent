@@ -1,8 +1,10 @@
 # Rk-Kalshi-Agent
 
-Paper-trading agent for Kalshi tennis markets. This repo is **paper-trade only**:
-it reads public Kalshi REST market data, computes a transparent edge, and
-simulates fills. It does **not** send live orders.
+Paper-trading agent for Kalshi tennis and Bitcoin markets. Order placement is
+**paper-only**: it reads public Kalshi REST market data, computes a transparent
+edge, and simulates fills. You can **connect** (read-only) via local `.env` keys to view live
+balance, positions, fills, and orders. Connecting does **not** send
+live orders.
 
 Kalshi tennis contracts are binary YES/NO event contracts (typically “player X
 wins the match”). Bankroll target is about **$100**. Job-hunt / JobPilot code
@@ -71,6 +73,9 @@ python3 -m rk_kalshi show-pnl
 
 # Local web dashboard (localhost only, paper mode locked)
 python3 -m rk_kalshi dashboard
+
+# Read-only live Kalshi portfolio (local API keys; no orders)
+python3 -m rk_kalshi account
 ```
 
 Optional: `python3 -m pip install -e .` then `rk-kalshi list-tennis-markets`.
@@ -79,24 +84,21 @@ Optional: `python3 -m pip install -e .` then `rk-kalshi list-tennis-markets`.
 
 The dashboard is a local FastAPI app: a **Start** page sets paper bankroll
 (default $100), max $ per trade, and daily loss, then polls until **Stop**.
-You can lock paper trading to **one Kalshi contract / match** by pasting
-a public tennis or Bitcoin URL or picking an open event. When a contract
-is set, paper trading uses only that event’s markets — not the full
-tennis universe or every Bitcoin book.
+Paste **any Kalshi market or event URL** to lock paper trading to that
+event’s contracts — not a whitelist of ATP/WTA/ITF/Bitcoin series.
+Challenger, Bitcoin 15-minute books, and other `KX…` events all work.
 
 Example Kalshi URLs:
 
 ```
 https://kalshi.com/markets/kxatpmatch/atp-tennis-match/kxatpmatch-26sep06cerblo
-https://kalshi.com/markets/kxwtamatch/wta-tennis-match/kxwtamatch-26mar29vekgor
-https://kalshi.com/markets/kxitfwmatch/itf-womens-match/kxitfwmatch-26sep06kursid
+https://kalshi.com/markets/kxatpchallengermatch/challenger-atp-/kxatpchallengermatch-26sep06kimtam
 https://kalshi.com/markets/kxbtc15m/bitcoin-price-up-down/kxbtc15m-26sep061845
 ```
 
-A bare event ticker such as `KXATPMATCH-26SEP06CERBLO` or
-`KXBTC15M-26SEP061845` also works. Series pages (`/markets/kxatpmatch`,
-`/markets/kxbtc15m`) and non-Kalshi links are rejected with a red error
-on the contract box.
+A bare event ticker such as `KXATPCHALLENGERMATCH-26SEP06KIMTAM` also
+works. Series pages (`/markets/kxatpmatch`) and non-Kalshi links are
+rejected with a red error on the contract box.
 
 **Stop** ends polling and leaves the paper book on screen so you can read
 it. **Clear** (shown after Stop / while idle) archives then wipes the
@@ -138,6 +140,72 @@ interface unless you understand it still paper-trades only.
 Existing CLI commands (`list-tennis-markets`, `paper-run`, `show-pnl`) are
 unchanged.
 
+## Connect Kalshi (read-only trades)
+
+The dashboard **Connect** button and `python -m rk_kalshi account` load your
+real Kalshi balance, open positions, recent fills, and orders. This is a
+**live account view**, separate from the paper desk. Connecting does
+**not** turn on live order placement (`live.enabled` stays false; the
+“Enable live trading” checkbox is a disabled coming-soon stub).
+
+Keys are **not** entered in the UI. Connect reads only a local `.env`
+file (gitignored).
+
+### Create API keys (demo + production)
+
+Kalshi demo and production credentials are **not** interchangeable.
+
+1. Log in:
+   - Production: [https://kalshi.com](https://kalshi.com) → Account & security → API Keys
+     (`https://kalshi.com/account/profile`)
+   - Demo: [https://demo.kalshi.co](https://demo.kalshi.co) → same API Keys page
+2. Click **Create Key** / **Create New API Key**.
+3. Save both:
+   - **API Key ID** (UUID shown on screen)
+   - **Private key** (downloaded `.key` PEM — Kalshi cannot show it again)
+
+### Windows: `.env` only
+
+Never commit `.key`, `.pem`, or `.env`. Do not paste keys into the
+dashboard.
+
+Command Prompt:
+
+```bat
+mkdir %USERPROFILE%\.kalshi
+move %USERPROFILE%\Downloads\kalshi-key.key %USERPROFILE%\.kalshi\kalshi.key
+
+cd path\to\Rk-Kalshi-Agent
+copy .env.example .env
+notepad .env
+```
+
+`.env` (repo root):
+
+```
+KALSHI_API_KEY_ID=a952bcbe-ec3b-4b5b-b8f9-11dae589608c
+KALSHI_PRIVATE_KEY_PATH=C:\Users\Rk\.kalshi\kalshi.key
+KALSHI_ENVIRONMENT=prod
+```
+
+Use `KALSHI_ENVIRONMENT=demo` with a demo key. Recommended REST roots:
+
+| Environment | Base URL |
+| --- | --- |
+| Production | `https://external-api.kalshi.com/trade-api/v2` |
+| Demo | `https://external-api.demo.kalshi.co/trade-api/v2` (`demo-api.kalshi.co` still works) |
+
+Then `python -m rk_kalshi dashboard` → **Connect**. Status shows
+Connected / Disconnected / Error. **Refresh** (optional auto-refresh)
+reloads the live trades panel. Public market reads still work without
+keys.
+
+```bat
+python -m rk_kalshi account
+```
+
+prints the same read-only snapshot in the terminal.
+
 ## Config
 
 Defaults live in `config.yaml`:
@@ -153,9 +221,11 @@ Defaults live in `config.yaml`:
 | `signal.edge_threshold_cents` | `3.0` | Net edge after spread + fee |
 | `kalshi.series_tickers` | `KXATPMATCH`, `KXWTAMATCH`, `KXITFWMATCH` | Match series |
 | `live.enabled` | `false` | Cannot enable the live stub |
+| `account.environment` | `prod` | Unused by Connect — demo/prod comes from `.env` `KALSHI_ENVIRONMENT` |
 
-Public base URL: `https://external-api.kalshi.com/trade-api/v2`. Reads do not
-need API keys.
+Public market-data base URL: `https://external-api.kalshi.com/trade-api/v2`.
+Those reads do not need API keys. Authenticated portfolio GETs use RSA-PSS
+headers and the demo or prod Trade API host you selected.
 
 ## Paper fill log (CSV + JSONL)
 
@@ -174,9 +244,10 @@ Written to `data/fills.csv` and `data/fills.jsonl`. Field names are locked in
 `fill_price` equals the live YES mid on the paper path. `can_size_up` is
 `false` while sizing is locked.
 
-## Live trading (not implemented)
+## Live trading (order placement not implemented)
 
-`LiveKalshiExecution` is a stub that raises `LiveTradingDisabledError`. When a
+Account **Connect** is read-only. `LiveKalshiExecution` still raises
+`LiveTradingDisabledError` if anyone tries to submit an order. When a
 human later enables live orders, Kalshi expects:
 
 1. API key id + RSA private key from account settings.

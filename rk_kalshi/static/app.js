@@ -48,10 +48,31 @@
     fillsBody: $("fills-body"),
     fillsMeta: $("fills-meta"),
     footer: $("footer-meta"),
+    accountBanner: $("account-banner"),
+    accountPill: $("account-pill"),
+    accountForm: $("account-form"),
+    accountConn: $("account-conn"),
+    accountHint: $("account-hint"),
+    btnConnect: $("btn-connect"),
+    btnDisconnect: $("btn-disconnect"),
+    enableLiveTrading: $("enable-live-trading"),
+    viewChip: $("view-chip"),
+    autoAccount: $("auto-account"),
+    btnAccountRefresh: $("btn-account-refresh"),
+    accountMeta: $("account-meta"),
+    liveBalance: $("live-balance"),
+    livePortfolio: $("live-portfolio"),
+    livePositions: $("live-positions"),
+    liveFills: $("live-fills"),
+    livePosHint: $("live-pos-hint"),
+    livePositionsBody: $("live-positions-body"),
+    liveFillsBody: $("live-fills-body"),
+    liveOrdersBody: $("live-orders-body"),
   };
 
   let running = false;
   let marketsTimer = null;
+  let accountTimer = null;
   let lastMarkets = null;
   let lastTarget = { active: false, event_ticker: "", market_ticker: "", label: "", asset_class: "" };
   let contractError = "";
@@ -269,8 +290,10 @@
     els.killPill.className = killed ? "pill hot" : "pill ok";
 
     const series = (status.series_tickers || []).join(", ");
+    const account = status.account || {};
     els.footer.textContent =
-      `localhost · paper_mode=true · live.enabled=false · btc=${status.trade_bitcoin} tennis=${status.trade_tennis} · live_matches_only=${status.live_matches_only} · series ${series} · edge ${status.edge_threshold_cents}¢`;
+      `localhost · paper_mode=true · live.enabled=false · account=${account.status || "disconnected"} · btc=${status.trade_bitcoin} tennis=${status.trade_tennis} · live_matches_only=${status.live_matches_only} · series ${series} · edge ${status.edge_threshold_cents}¢`;
+    renderAccountStatus(account, status.account_environment_default);
     if (!els.startForm.dataset.seeded) {
       if (status.starting_cash != null) els.startingCash.value = status.starting_cash;
       if (status.max_dollars_per_ticker != null) els.maxPerTrade.value = status.max_dollars_per_ticker;
@@ -295,7 +318,7 @@
     const books = [
       status.trade_bitcoin ? "Bitcoin buy+sell" : null,
       lastTarget.active
-        ? `${lastTarget.asset_class === "bitcoin" ? "btc" : "tennis"} ${lastTarget.label || lastTarget.event_ticker}`
+        ? `${lastTarget.asset_class || "kalshi"} ${lastTarget.label || lastTarget.event_ticker}`
         : (status.trade_tennis ? (status.live_matches_only ? "live tennis" : "all tennis") : null),
     ].filter(Boolean).join(" · ") || "no books selected";
     els.startHint.textContent = running
@@ -347,13 +370,13 @@
     if (!lastTarget.active) {
       els.contractStatus.textContent = "No contract selected — paper can scan the full enabled universe.";
     } else if (lastTarget.market_ticker) {
-      const kind = lastTarget.asset_class === "bitcoin" ? "Bitcoin" : "tennis";
+      const kind = lastTarget.asset_class || "Kalshi";
       els.contractStatus.textContent =
         `Selected ${kind} contract ${lastTarget.market_ticker} on ${lastTarget.event_ticker}. Paper trading will use only this market.`;
     } else {
-      const kind = lastTarget.asset_class === "bitcoin" ? "Bitcoin event" : "tennis match";
+      const kind = lastTarget.asset_class || "Kalshi";
       els.contractStatus.textContent =
-        `Selected ${kind} ${lastTarget.label || lastTarget.event_ticker}. Paper trading will use only this event’s contracts.`;
+        `Selected ${kind} event ${lastTarget.label || lastTarget.event_ticker}. Paper trading will use only this event’s contracts.`;
     }
   }
 
@@ -394,6 +417,196 @@
     }
     setRunEnabled(!running);
     renderLog(run.logs);
+  }
+
+  function renderAccountStatus(account, defaultEnv) {
+    const status = (account && account.status) || "disconnected";
+    const label = status === "connected" ? "Connected" : status === "error" ? "Error" : "Disconnected";
+    if (els.accountConn) {
+      els.accountConn.textContent = label;
+      els.accountConn.className = `conn ${status}`;
+    }
+    if (els.accountBanner) {
+      els.accountBanner.textContent = account.banner
+        || "KALSHI ACCOUNT DISCONNECTED — paper desk only";
+      els.accountBanner.className = `banner account-banner is-${status}`;
+    }
+    if (els.accountPill) {
+      els.accountPill.textContent = status === "connected"
+        ? `account ${account.environment || ""}`.trim()
+        : `account ${status}`;
+      els.accountPill.className = status === "connected" ? "pill ok" : status === "error" ? "pill hot" : "pill lock";
+    }
+    if (els.viewChip) {
+      if (status === "connected") {
+        const env = (account.environment || "prod") === "demo" ? "demo" : "prod";
+        els.viewChip.textContent = `Live account · ${env}`;
+        els.viewChip.className = "view-chip live-chip";
+      } else {
+        els.viewChip.textContent = "Paper desk";
+        els.viewChip.className = "view-chip paper-chip";
+      }
+    }
+    if (els.accountHint) {
+      const suffix = account.api_key_id_suffix ? ` key ${account.api_key_id_suffix}` : "";
+      els.accountHint.textContent = account.message
+        || (status === "connected"
+          ? `Read-only${suffix}. Live trading stays off.`
+          : "Copy .env.example to .env (KALSHI_API_KEY_ID + KALSHI_PRIVATE_KEY_PATH), then Connect.");
+    }
+    if (els.enableLiveTrading) {
+      els.enableLiveTrading.checked = false;
+      els.enableLiveTrading.disabled = true;
+    }
+    if (els.btnDisconnect) els.btnDisconnect.disabled = status === "disconnected" && !account.api_key_id_suffix;
+  }
+
+  function emptyLiveTables(message) {
+    if (els.livePositionsBody) {
+      els.livePositionsBody.innerHTML = `<tr><td colspan="7" class="empty">${escapeHtml(message)}</td></tr>`;
+    }
+    if (els.liveFillsBody) {
+      els.liveFillsBody.innerHTML = `<tr><td colspan="8" class="empty">${escapeHtml(message)}</td></tr>`;
+    }
+    if (els.liveOrdersBody) {
+      els.liveOrdersBody.innerHTML = `<tr><td colspan="7" class="empty">${escapeHtml(message)}</td></tr>`;
+    }
+    if (els.liveBalance) els.liveBalance.textContent = "—";
+    if (els.livePortfolio) els.livePortfolio.textContent = "—";
+    if (els.livePositions) els.livePositions.textContent = "0";
+    if (els.liveFills) els.liveFills.textContent = "0";
+  }
+
+  function renderPortfolio(payload) {
+    if (payload.account) renderAccountStatus(payload.account);
+    const connected = payload.account && payload.account.status === "connected";
+    if (els.accountMeta) {
+      const env = payload.account && payload.account.environment;
+      els.accountMeta.textContent = connected
+        ? `${env || "prod"} · ${payload.counts.positions} pos · ${payload.counts.fills} fills · ${payload.counts.orders} orders · ${fmt(payload.latency_ms, 1)} ms`
+        : (payload.account && payload.account.message) || "not connected";
+    }
+    if (els.liveBalance) els.liveBalance.textContent = payload.balance == null ? "—" : `$${fmt(payload.balance, 2)}`;
+    if (els.livePortfolio) els.livePortfolio.textContent = payload.portfolio_value == null ? "—" : `$${fmt(payload.portfolio_value, 2)}`;
+    if (els.livePositions) els.livePositions.textContent = String((payload.counts && payload.counts.positions) || 0);
+    if (els.liveFills) els.liveFills.textContent = String((payload.counts && payload.counts.fills) || 0);
+    if (els.livePosHint) els.livePosHint.textContent = "read-only · not paper";
+
+    const positions = payload.positions || [];
+    if (!positions.length) {
+      els.livePositionsBody.innerHTML = '<tr><td colspan="7" class="empty">No open Kalshi positions.</td></tr>';
+    } else {
+      els.livePositionsBody.innerHTML = positions.map((row) => `
+        <tr>
+          <td class="ticker">${escapeHtml(row.ticker)}</td>
+          <td>${escapeHtml(row.side)}</td>
+          <td class="num">${fmt(row.contracts, 2)}</td>
+          <td class="num">${fmt(row.exposure, 2)}</td>
+          <td class="num">${fmt(row.realized_pnl, 2)}</td>
+          <td class="num">${fmt(row.fees_paid, 2)}</td>
+          <td class="when">${escapeHtml(formatLocalDateTime(row.last_updated))}</td>
+        </tr>
+      `).join("");
+    }
+
+    const fills = payload.fills || [];
+    if (!fills.length) {
+      els.liveFillsBody.innerHTML = '<tr><td colspan="8" class="empty">No recent Kalshi fills.</td></tr>';
+    } else {
+      els.liveFillsBody.innerHTML = fills.map((row) => `
+        <tr>
+          <td class="when">${escapeHtml(formatLocalDateTime(row.created_time))}</td>
+          <td class="ticker">${escapeHtml(row.ticker)}</td>
+          <td>${escapeHtml(row.book_side || "")}</td>
+          <td>${escapeHtml(row.outcome_side || "")}</td>
+          <td class="num">${fmt(row.count, 2)}</td>
+          <td class="num">${fmt(row.yes_price, 4)}</td>
+          <td class="num">${fmt(row.fee, 4)}</td>
+          <td>${row.is_taker ? "taker" : "maker"}</td>
+        </tr>
+      `).join("");
+    }
+
+    const orders = payload.orders || [];
+    if (!orders.length) {
+      els.liveOrdersBody.innerHTML = '<tr><td colspan="7" class="empty">No Kalshi orders returned.</td></tr>';
+    } else {
+      els.liveOrdersBody.innerHTML = orders.map((row) => `
+        <tr>
+          <td>${escapeHtml(row.status)}</td>
+          <td class="ticker">${escapeHtml(row.ticker)}</td>
+          <td>${escapeHtml(row.book_side || "")}</td>
+          <td class="num">${fmt(row.remaining, 2)}</td>
+          <td class="num">${fmt(row.fill_count, 2)}</td>
+          <td class="num">${fmt(row.yes_price, 4)}</td>
+          <td class="when">${escapeHtml(formatLocalDateTime(row.created_time))}</td>
+        </tr>
+      `).join("");
+    }
+
+    const errors = payload.errors || {};
+    const errText = Object.values(errors).filter(Boolean).join(" · ");
+    if (errText && els.accountMeta) {
+      els.accountMeta.textContent = errText;
+    }
+  }
+
+  async function refreshPortfolio() {
+    if (els.accountMeta) els.accountMeta.textContent = "loading…";
+    try {
+      const status = await fetchJSON("/api/account");
+      renderAccountStatus(status);
+      if (status.status === "disconnected" && !status.api_key_id_suffix) {
+        emptyLiveTables("Connect to load live positions.");
+        if (els.accountMeta) els.accountMeta.textContent = "not connected";
+        return;
+      }
+      const payload = await fetchJSON("/api/account/portfolio");
+      renderPortfolio(payload);
+    } catch (err) {
+      emptyLiveTables(err.message);
+      if (els.accountMeta) els.accountMeta.textContent = err.message;
+    }
+  }
+
+  async function connectAccount() {
+    if (els.btnConnect) els.btnConnect.disabled = true;
+    try {
+      const payload = await fetchJSON("/api/account/connect", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          enable_live_trading: false,
+          mode: "paper",
+        }),
+      });
+      renderAccountStatus(payload.account || {});
+      await refreshPortfolio();
+    } catch (err) {
+      renderAccountStatus({
+        status: "error",
+        banner: "KALSHI ACCOUNT ERROR — paper desk is unchanged; live orders stay disabled",
+        message: err.message,
+      });
+      emptyLiveTables(err.message);
+      if (els.accountMeta) els.accountMeta.textContent = err.message;
+    } finally {
+      if (els.btnConnect) els.btnConnect.disabled = false;
+    }
+  }
+
+  async function disconnectAccount() {
+    if (els.btnDisconnect) els.btnDisconnect.disabled = true;
+    try {
+      const payload = await fetchJSON("/api/account/disconnect", { method: "POST" });
+      renderAccountStatus(payload.account || { status: "disconnected" });
+      emptyLiveTables("Connect to load live positions.");
+      if (els.accountMeta) els.accountMeta.textContent = "disconnected";
+    } catch (err) {
+      if (els.accountMeta) els.accountMeta.textContent = err.message;
+    } finally {
+      if (els.btnDisconnect) els.btnDisconnect.disabled = false;
+    }
   }
 
   function escapeHtml(value) {
@@ -601,6 +814,22 @@
       if (lastMarkets) renderMarkets(lastMarkets);
     });
   }
+  if (els.btnConnect) els.btnConnect.addEventListener("click", () => connectAccount());
+  if (els.btnDisconnect) els.btnDisconnect.addEventListener("click", () => disconnectAccount());
+  if (els.btnAccountRefresh) {
+    els.btnAccountRefresh.addEventListener("click", () => { refreshPortfolio(); });
+  }
+  if (els.autoAccount) {
+    els.autoAccount.addEventListener("change", () => {
+      if (accountTimer) {
+        clearInterval(accountTimer);
+        accountTimer = null;
+      }
+      if (els.autoAccount.checked) {
+        accountTimer = setInterval(refreshPortfolio, 15000);
+      }
+    });
+  }
   els.autoMarkets.addEventListener("change", () => {
     if (marketsTimer) {
       clearInterval(marketsTimer);
@@ -622,4 +851,5 @@
     els.log.textContent = `error: ${err.message}`;
   });
   refreshMarkets();
+  refreshPortfolio().catch(() => {});
 })();

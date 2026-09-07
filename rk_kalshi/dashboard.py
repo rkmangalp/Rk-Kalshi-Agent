@@ -18,11 +18,20 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
+import httpx
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, model_validator
 
+from rk_kalshi.account import (
+    AccountApiError,
+    AccountNotConnectedError,
+    AccountService,
+    LIVE_TRADING_MESSAGE,
+    default_store_path,
+)
+from rk_kalshi.auth import AccountAuthError
 from rk_kalshi.client import KalshiPublicClient
 from rk_kalshi.config import AppConfig, load_config
 from rk_kalshi.journal import clear_fill_logs, read_fills, summarize_pnl
@@ -91,6 +100,19 @@ class StartRequest(BaseModel):
     @model_validator(mode="after")
     def reject_live(self) -> "StartRequest":
         _reject_live(self.live, self.mode)
+        return self
+
+
+class ConnectRequest(BaseModel):
+    enable_live_trading: bool | None = None
+    live: bool | None = None
+    mode: str | None = None
+
+    @model_validator(mode="after")
+    def reject_live(self) -> "ConnectRequest":
+        _reject_live(self.live, self.mode)
+        if self.enable_live_trading:
+            raise ValueError(LIVE_TRADING_MESSAGE)
         return self
 
 
@@ -315,6 +337,7 @@ class DashboardService:
         client: KalshiPublicClient | None = None,
         runner: PaperRunner | None = None,
         config_path: Path | None = None,
+        account: AccountService | None = None,
     ):
         self.cfg = cfg
         self.config_path = Path(config_path) if config_path else None
@@ -322,6 +345,11 @@ class DashboardService:
         self.owns_client = client is None
         self.runner = runner or PaperRunner(cfg, client=self.client)
         self.controller = RunController(self.runner, cfg)
+        self.account = account or AccountService(
+            store_path=default_store_path(cfg.state_path.parent),
+            timeout_s=cfg.request_timeout_s,
+        )
+        self.owns_account = account is None
         self.last_contract_error = ""
 
     def target_payload(self, cfg: AppConfig | None = None) -> dict[str, Any]:
@@ -331,6 +359,8 @@ class DashboardService:
         self.runner.close()
         if self.owns_client:
             self.client.close()
+        if self.owns_account:
+            self.account.close()
 
     def bind_config(self, cfg: AppConfig) -> None:
         self.cfg = cfg
@@ -427,7 +457,6 @@ class DashboardService:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         self.last_contract_error = ""
         label = parsed.event_ticker
-        is_crypto = parsed.asset_class == "bitcoin"
         cfg = replace(
             self.cfg,
             target_url=parsed.raw if parsed.source == "url" else "",
@@ -435,8 +464,8 @@ class DashboardService:
             target_market_ticker=parsed.market_ticker or "",
             target_label=label,
             target_asset_class=parsed.asset_class,
-            trade_tennis=True if not is_crypto else self.cfg.trade_tennis,
-            trade_bitcoin=True if is_crypto else self.cfg.trade_bitcoin,
+            trade_tennis=True if parsed.asset_class == "tennis" else self.cfg.trade_tennis,
+            trade_bitcoin=True if parsed.asset_class == "bitcoin" else self.cfg.trade_bitcoin,
             live_enabled=False,
         )
         self.bind_config(cfg)
@@ -700,6 +729,8 @@ def _status_payload(service: DashboardService) -> dict[str, Any]:
         "bitcoin_series_tickers": list(service.cfg.bitcoin_series_tickers),
         "target": service.target_payload(),
         "run": service.controller.snapshot(),
+        "account": service.account.snapshot(),
+        "account_environment_default": service.cfg.account_environment,
     }
 
 
@@ -708,6 +739,7 @@ def create_app(
     client: KalshiPublicClient | None = None,
     runner: PaperRunner | None = None,
     config_path: Path | None = None,
+    account: AccountService | None = None,
 ) -> FastAPI:
     if cfg is None:
         default_path = Path("config.yaml")
@@ -717,7 +749,9 @@ def create_app(
     elif config_path is not None:
         config_path = Path(config_path)
     cfg = _cfg_from_session(cfg)
-    service = DashboardService(cfg, client=client, runner=runner, config_path=config_path)
+    service = DashboardService(
+        cfg, client=client, runner=runner, config_path=config_path, account=account
+    )
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
@@ -749,7 +783,12 @@ def create_app(
 
     @app.get("/api/health")
     def health() -> dict[str, Any]:
-        return {"ok": True, "paper_mode": True, "live_enabled": False}
+        return {
+            "ok": True,
+            "paper_mode": True,
+            "live_enabled": False,
+            "account": service.account.snapshot(),
+        }
 
     @app.get("/api/status")
     def status() -> dict[str, Any]:
@@ -759,6 +798,23 @@ def create_app(
     def markets() -> dict[str, Any]:
         try:
             snapshots, latency_ms = service.client.list_markets()
+            target_event = service.cfg.target_event_ticker
+            fetch_event = getattr(service.client, "list_event_markets", None)
+            if target_event and callable(fetch_event):
+                fetched = fetch_event(target_event)
+                if (
+                    isinstance(fetched, tuple)
+                    and len(fetched) == 2
+                    and isinstance(fetched[0], list)
+                ):
+                    extra, extra_ms = fetched
+                    try:
+                        latency_ms = max(float(latency_ms), float(extra_ms or 0.0))
+                    except (TypeError, ValueError):
+                        pass
+                    if extra:
+                        seen = {m.ticker for m in snapshots}
+                        snapshots = list(snapshots) + [m for m in extra if m.ticker not in seen]
         except Exception as exc:  # noqa: BLE001 — HTTP client / parse errors
             raise HTTPException(status_code=502, detail=f"Kalshi public API error: {exc}") from exc
         tennis = [m for m in snapshots if m.asset_class != "bitcoin"]
@@ -767,7 +823,8 @@ def create_app(
             near_money_low=service.cfg.bitcoin_near_money_low,
             near_money_high=service.cfg.bitcoin_near_money_high,
         )
-        payload = [_market_payload(m) for m in tennis + bitcoin]
+        others = [m for m in snapshots if m.asset_class not in {"tennis", "bitcoin"}]
+        payload = [_market_payload(m) for m in tennis + bitcoin + others]
         payload.sort(key=lambda row: (0 if row["asset_class"] == "bitcoin" else 1, row["event_name"], row["ticker"]))
         return {
             "count": len(payload),
@@ -862,6 +919,49 @@ def create_app(
     @app.post("/api/clear")
     def clear_session() -> dict[str, Any]:
         return service.clear_session()
+
+    @app.get("/api/account")
+    def account_status() -> dict[str, Any]:
+        return service.account.snapshot()
+
+    @app.post("/api/account/connect")
+    def account_connect(body: ConnectRequest) -> dict[str, Any]:
+        try:
+            snapshot = service.account.connect_from_env()
+        except AccountAuthError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except AccountApiError as exc:
+            raise HTTPException(status_code=401, detail=str(exc)) from exc
+        except httpx.HTTPError as exc:
+            raise HTTPException(status_code=502, detail=f"Kalshi account request failed: {exc}") from exc
+        return {
+            "account": snapshot,
+            "paper_mode": True,
+            "live_enabled": False,
+            "read_only": True,
+            "note": "Connected from .env (read-only). Live order placement stays disabled.",
+        }
+
+    @app.post("/api/account/disconnect")
+    def account_disconnect() -> dict[str, Any]:
+        return {
+            "account": service.account.disconnect(),
+            "paper_mode": True,
+            "live_enabled": False,
+        }
+
+    @app.get("/api/account/portfolio")
+    def account_portfolio() -> dict[str, Any]:
+        try:
+            return service.account.portfolio()
+        except AccountNotConnectedError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except AccountAuthError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except AccountApiError as exc:
+            raise HTTPException(status_code=401, detail=str(exc)) from exc
+        except httpx.HTTPError as exc:
+            raise HTTPException(status_code=502, detail=f"Kalshi account request failed: {exc}") from exc
 
     return app
 

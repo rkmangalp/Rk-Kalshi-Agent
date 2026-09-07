@@ -30,6 +30,11 @@ def main(argv: list[str] | None = None) -> int:
 
     sub.add_parser("show-pnl", help="Summarize paper fill logs")
 
+    sub.add_parser(
+        "account",
+        help="Show connected Kalshi account portfolio (read-only; no live orders)",
+    )
+
     dash = sub.add_parser(
         "dashboard",
         aliases=["serve"],
@@ -61,6 +66,8 @@ def main(argv: list[str] | None = None) -> int:
         return _cmd_paper_run(cfg, cycles=cycles, sleep_s=args.sleep)
     if args.command == "show-pnl":
         return _cmd_show_pnl(cfg)
+    if args.command == "account":
+        return _cmd_account(cfg)
     if args.command in {"dashboard", "serve"}:
         return _cmd_dashboard(
             cfg,
@@ -155,6 +162,33 @@ def _format_market(market: MarketSnapshot) -> str:
         f"{(mid if mid is not None else 0):6.3f} {market.last_price:6.3f} "
         f"{(spr if spr is not None else 0):5.1f} {market.volume:8.1f}"
     )
+
+
+def _cmd_account(cfg) -> int:
+    from rk_kalshi.account import AccountService, default_store_path, format_account_cli
+
+    service = AccountService(
+        store_path=default_store_path(cfg.state_path.parent),
+        timeout_s=cfg.request_timeout_s,
+    )
+    try:
+        status = service.snapshot()
+        if status["status"] == "disconnected" and not status.get("api_key_id_suffix"):
+            print(format_account_cli(None, status))
+            print(
+                "not connected — set KALSHI_API_KEY_ID + KALSHI_PRIVATE_KEY_PATH in .env"
+            )
+            return 1
+        try:
+            portfolio = service.portfolio()
+        except Exception as exc:  # noqa: BLE001 — surface in CLI
+            print(format_account_cli(None, service.snapshot()))
+            print(f"error: {exc}", file=sys.stderr)
+            return 1
+        print(format_account_cli(portfolio, portfolio.get("account") or status))
+        return 0
+    finally:
+        service.close()
 
 
 def _cmd_dashboard(cfg, host: str, port: int, open_browser: bool, config_path=None) -> int:

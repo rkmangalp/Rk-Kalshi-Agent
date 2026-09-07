@@ -1,6 +1,7 @@
 import unittest
 
 from rk_kalshi.kalshi_url import (
+    EXAMPLE_CHALLENGER_URL,
     EXAMPLE_CRYPTO_URLS,
     EXAMPLE_URLS,
     KalshiTennisUrlError,
@@ -99,6 +100,28 @@ class KalshiUrlTests(unittest.TestCase):
         eth = parse_contract("KXETH15M-26SEP061845")
         self.assertEqual(eth.asset_class, "bitcoin")
         self.assertEqual(eth.series_ticker, "KXETH15M")
+
+    def test_parse_contract_accepts_challenger_and_other_series(self):
+        parsed = parse_contract(EXAMPLE_CHALLENGER_URL)
+        self.assertEqual(parsed.series_ticker, "KXATPCHALLENGERMATCH")
+        self.assertEqual(parsed.event_ticker, "KXATPCHALLENGERMATCH-26SEP06KIMTAM")
+        self.assertIsNone(parsed.market_ticker)
+        self.assertEqual(parsed.asset_class, "tennis")
+        market = parse_contract("KXATPCHALLENGERMATCH-26SEP06KIMTAM-KIM")
+        self.assertEqual(market.market_ticker, "KXATPCHALLENGERMATCH-26SEP06KIMTAM-KIM")
+        self.assertEqual(market.event_ticker, "KXATPCHALLENGERMATCH-26SEP06KIMTAM")
+        nfl = parse_contract(
+            "https://kalshi.com/markets/kxnhlgame/nhl-game/kxnhlgame-26sep06edmtor"
+        )
+        self.assertEqual(nfl.series_ticker, "KXNHLGAME")
+        self.assertEqual(nfl.event_ticker, "KXNHLGAME-26SEP06EDMTOR")
+        self.assertEqual(nfl.asset_class, "other")
+        weather = parse_contract("KXHIGHNY-24JAN01")
+        self.assertEqual(weather.event_ticker, "KXHIGHNY-24JAN01")
+        self.assertEqual(weather.asset_class, "other")
+        with self.assertRaises(KalshiUrlError) as ctx:
+            parse_contract("https://kalshi.com/markets/kxatpchallengermatch")
+        self.assertIn("series page", str(ctx.exception))
 
     def test_parse_contract_keeps_tennis_and_rejects_garbage(self):
         tennis = parse_contract(EXAMPLE_URLS[0])
