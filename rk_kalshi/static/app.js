@@ -593,6 +593,12 @@
     const liveOn = deskMode === "live";
     document.body.classList.toggle("desk-paper", !liveOn);
     document.body.classList.toggle("desk-live", liveOn);
+    document.querySelectorAll(".live-only").forEach((node) => {
+      node.hidden = !liveOn;
+    });
+    document.querySelectorAll(".paper-only").forEach((node) => {
+      node.hidden = liveOn;
+    });
     document.title = liveOn ? "Rk Kalshi LIVE Desk" : "Rk Kalshi Paper Desk";
     if (els.btnDeskPaper) {
       els.btnDeskPaper.classList.toggle("is-on", !liveOn);
