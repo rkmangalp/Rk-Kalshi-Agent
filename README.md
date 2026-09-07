@@ -1,15 +1,15 @@
 # Rk-Kalshi-Agent
 
-Paper-trading agent for Kalshi tennis and Bitcoin markets. Order placement is
-**paper-only**: it reads public Kalshi REST market data, computes a transparent
-edge, and simulates fills. You can **connect** a Kalshi API key to view your
-live balance, positions, fills, and orders. Connecting does **not** send
-live orders.
+Paper-trading agent for Kalshi tennis and Bitcoin markets, with **optional**
+live order placement under small hard caps. **Paper is the default.** Live is
+opt-in from the dashboard after Connect (local `.env` credentials) and a
+real-money confirmation. Connecting by itself does **not** send orders.
 
 The paper signal is **Avellaneda–Stoikov reservation price + order-book
-imbalance**, after Kalshi fees and spread. It is **not financial advice**,
+imbalance**, after Kalshi fees and spread. Hybrid / ChatGPT research may
+inform signals; **risk gates always win**. This is **not financial advice**,
 **not** a match-winner or Bitcoin price model, and there is **no guaranteed
-profitable edge**. Treat paper P&L as an audit of costs and risk caps.
+profitable edge**. **Live losses are real.**
 
 Kalshi tennis contracts are binary YES/NO event contracts (typically “player X
 wins the match”). Bankroll target is about **$100**. Job-hunt / JobPilot code
@@ -38,6 +38,11 @@ Kalshi public REST  →  SignalEngine  →  RiskManager  →  PaperExecution
      (no auth)         (AS + OBI)      (caps/kill)     (fill @ YES mid)
                                                                   ↓
                                                          CSV + JSONL journal
+
+Kalshi signed REST  →  same signals   →  RiskManager  →  LiveKalshiExecution
+     (opt-in Live)                     (hard caps)      POST /portfolio/events/orders
+                                                                  ↓
+                                                    Live account view (Kalshi fills)
 ```
 
 1. **Signal** (`rk_kalshi/signal.py`) is separate from execution. For each
@@ -51,12 +56,16 @@ Kalshi public REST  →  SignalEngine  →  RiskManager  →  PaperExecution
    only when net edge ≥ `edge_threshold_cents` (default 3¢). Wide or stale mids
    are skipped. Optional EMA / last-print fair (`use_ema_fallback`) is used
    only when inventory and OBI are idle. **Not a match pick.**
-2. **Paper execution** (`rk_kalshi/execution.py`) fills at the live YES mid.
-   `LiveKalshiExecution` always raises; live trading is disabled.
-3. **Risk** (`rk_kalshi/risk.py`): max **$5** notional per ticker (default),
-   daily loss kill-switch **$15** (mark-to-market), **no martingale** (size
-   never increases after a losing close — enforced in code even if config is
-   flipped).
+2. **Paper execution** (`rk_kalshi/execution.py`) fills at the live YES mid
+   and never calls `create_order`. **Live execution** (opt-in) RSA-PSS-signs
+   `POST /trade-api/v2/portfolio/events/orders` (Create Order V2: `bid`/`ask`,
+   fixed-point `count`/`price`, `immediate_or_cancel`). Paper journal stays
+   separate; live fills/orders show in the Live account panel.
+3. **Risk** (`rk_kalshi/risk.py`): paper defaults max **$5** notional per
+   ticker and daily loss kill-switch **$15**. Live clamps to default **$5**
+   per trade (hard ceiling **$10** even if the UI asks higher) and default
+   **$10** daily loss (hard ceiling **$25**). **No martingale**. `allow_size_up`
+   stays **false** on the live path.
 4. **Latency**: each cycle records `latency_ms` from the Kalshi HTTP scan.
 
 ## Setup
@@ -113,9 +122,14 @@ OPENAI_API_KEY=sk-...
 ```
 
 Then `python -m rk_kalshi dashboard` → pick category + live match → leave
-**Active** and **Hybrid** → Start. ChatGPT is asked to anticipate score /
+**Active** and **Hybrid** → Start (paper). ChatGPT is asked to anticipate score /
 momentum swings and how those map to YES/NO mids. It is slow versus the
-book, costs tokens, and is **not** a guaranteed edge. Live orders stay off.
+book, costs tokens, and is **not** a guaranteed edge.
+
+To place **one real order path** on that same match: Connect first, check
+**Enable live trading** and **I understand this spends real money**, then
+Start. Caps apply ($5 default / $10 hard ceiling per trade). Uncheck Live
+to return to paper. Never paste keys in the UI or in chat.
 
 Example Kalshi URLs:
 
@@ -134,8 +148,8 @@ it. **Clear** (shown after Stop / while idle) archives then wipes the
 *local* paper session: fills journal, bankroll state, P&L, live log, and
 the selected contract. It does **not** touch a live Kalshi account.
 Upcoming books are shown but not paper-traded while “Live matches only”
-is on (unless a specific match is selected). The UI **cannot** place live
-orders. `can_size_up` stays locked.
+is on (unless a specific match is selected). Live order placement is
+**opt-in** (Connect + confirmation). `can_size_up` stays locked.
 Chosen amounts are written to `data/dashboard_session.json` and
 `config.yaml` so the next paper-run uses them. Default bind is
 `127.0.0.1:8765`.
@@ -164,18 +178,19 @@ Then open [http://127.0.0.1:8765](http://127.0.0.1:8765) in a browser.
 
 Equivalent: `python -m rk_kalshi serve`. Optional `--port 8765`, `--open` to
 launch the browser, `--host 127.0.0.1`. Do not point this UI at a public
-interface unless you understand it still paper-trades only.
+interface unless you understand paper is default and live still requires
+the on-screen confirmation.
 
 Existing CLI commands (`list-tennis-markets`, `paper-run`, `show-pnl`) are
 unchanged.
 
-## Connect Kalshi (read-only trades)
+## Connect Kalshi (portfolio view)
 
 The dashboard **Connect** button and `python -m rk_kalshi account` load your
 real Kalshi balance, open positions, recent fills, and orders from **local
 credentials only**. There is no API-key form in the UI. Connecting does
-**not** turn on live order placement (`live.enabled` stays false; the
-“Enable live trading” checkbox is a disabled coming-soon stub).
+**not** turn on live order placement. Enable Live with the dashboard toggle
+plus the real-money checkbox after Connect.
 
 ### Create API keys (demo + production)
 
@@ -248,7 +263,8 @@ Default model is `gpt-4o-mini` (`signal.llm_model`). Calls are rate-limited
 tennis score/momentum swings (or short-horizon Bitcoin drift) and map those to
 YES/NO mid moves — not just restate the current odds. That research is
 **advisory**, **slow** versus the book, costs API tokens, and is **not** a
-guaranteed edge or a match predictor. Live orders stay disabled.
+guaranteed edge or a match predictor. On the live path those research notes
+still cannot bypass risk caps, the daily kill-switch, or `allow_size_up: false`.
 
 Start-panel trading modes (paper knobs only): **Safe**, **Conservative**,
 **Active** (default), **Aggressive**.
@@ -275,8 +291,10 @@ Defaults live in `config.yaml`:
 | `signal.llm_min_interval_s` | `20` | Minimum seconds between ChatGPT calls |
 | `signal.llm_max_markets_per_call` | `6` | Cap markets sent to ChatGPT per cycle |
 | `kalshi.series_tickers` | `KXATPMATCH`, `KXWTAMATCH`, `KXITFWMATCH`, `KXITFMMATCH`, `KXATPCHALLENGERMATCH` | Match series |
-| `live.enabled` | `false` | Cannot enable the live stub |
-| `account.environment` | `prod` | Default demo/prod if `.env` omits `KALSHI_ENVIRONMENT` |
+| `live.enabled` | `false` | YAML default; dashboard still requires Connect + confirmation |
+| `live.max_dollars_per_ticker` | `5` | Live default $/trade (hard ceiling $10 in code) |
+| `live.daily_loss_limit` | `10` | Live daily kill-switch (hard ceiling $25 in code) |
+| `account.environment` | `prod` | Default demo/prod if `.env` omits `KALSHI_ENVIRONMENT` — live start **refuses** a blank/ambiguous env |
 
 Public market-data base URL: `https://external-api.kalshi.com/trade-api/v2`.
 Those reads do not need API keys. Authenticated portfolio GETs use RSA-PSS
@@ -299,24 +317,42 @@ Written to `data/fills.csv` and `data/fills.jsonl`. Field names are locked in
 `fill_price` equals the live YES mid on the paper path. `can_size_up` is
 `false` while sizing is locked.
 
-## Live trading (order placement not implemented)
+## Live trading (opt-in, hard caps)
 
-Account **Connect** is read-only. `LiveKalshiExecution` still raises
-`LiveTradingDisabledError` if anyone tries to submit an order. When a
-human later enables live orders, Kalshi expects:
+Paper stays the default and stays selectable. Live must be armed in the
+dashboard:
 
-1. API key id + RSA private key from account settings.
-2. RSA-PSS SHA-256 signature of `timestamp_ms + METHOD + path` (path only; no
-   query string). MGF1-SHA256, salt length = digest length.
-3. Headers: `KALSHI-ACCESS-KEY`, `KALSHI-ACCESS-TIMESTAMP`,
-   `KALSHI-ACCESS-SIGNATURE`.
-4. `POST /trade-api/v2/portfolio/events/orders` (Create Order V2) with
-   `ticker`, `side` (`bid`/`ask`), fixed-point `count` and `price`,
-   `time_in_force`, `self_trade_prevention_type`. The legacy
-   `POST /portfolio/orders` (yes/no + buy/sell) was removed.
+1. Set `KALSHI_API_KEY_ID`, `KALSHI_PRIVATE_KEY_PATH`, and
+   `KALSHI_ENVIRONMENT` (`demo` or `prod`) in a **local `.env`**. Never paste
+   keys in the UI or in chat.
+2. **Connect**. Confirm the Live account panel shows your real balance.
+3. Check **Enable live trading** and **I understand this spends real money**.
+4. Pick one category + match (Active + Hybrid is fine). Start.
 
-Do not implement or arm that path until paper P&L is positive on a large
-sample.
+Live posts Kalshi **Create Order V2**:
+`POST /trade-api/v2/portfolio/events/orders` with RSA-PSS headers already
+used for account reads (`timestamp_ms + METHOD + path`, path only). Body
+uses `side` `bid`/`ask`, fixed-point `count`/`price`,
+`time_in_force=immediate_or_cancel`, `self_trade_prevention_type=taker_at_cross`.
+Cancel uses `DELETE /portfolio/events/orders/{order_id}` when Stop or the
+kill-switch hits a resting remainder.
+
+**Non-bypassable live caps** (code, not YAML):
+
+- Max **$5** per trade/ticker by default; UI/style values above **$10** are
+  clamped to $10.
+- Daily loss kill-switch default **$10** (hard ceiling $25). New live orders
+  stop for the UTC day.
+- `allow_size_up: false` and no martingale, even if config is flipped.
+- Contract count is limited so notional + fee stay under the dollar cap.
+- Live start is refused if credentials are missing or `KALSHI_ENVIRONMENT` is
+  blank / not `demo`|`prod`, or demo/prod does not match the host.
+
+Live fills and orders appear in **Live account view** (Kalshi). The paper
+fill CSV/JSONL is not used for live fills.
+
+**Losses are real.** Uncheck Live (or Disconnect) to return to paper. CLI
+`paper-run` never posts live orders.
 
 ## Tests
 
@@ -325,4 +361,6 @@ python3 -m unittest discover -s tests -v
 ```
 
 Coverage includes ticker dollar caps, no-martingale, daily kill-switch, fill
-logging, locked schema field names, and `can_size_up` staying false.
+logging, locked schema field names, `can_size_up` staying false, live disabled
+by default, live hard ceilings, paper never calling `create_order`, and
+RSA-PSS signing for Create Order V2.

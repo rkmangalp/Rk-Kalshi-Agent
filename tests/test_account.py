@@ -207,10 +207,12 @@ class ParserTests(unittest.TestCase):
 
 
 class FakeSignedClient:
-    def __init__(self, credentials, timeout_s: float = 15.0, client=None):
+    def __init__(self, credentials, timeout_s: float = 15.0, client=None, orders_enabled: bool = False):
         self.credentials = credentials
         self.closed = False
         self.calls: list[str] = []
+        self.created_orders: list[dict] = []
+        self.orders_enabled = bool(orders_enabled)
 
     def close(self) -> None:
         self.closed = True
@@ -267,7 +269,29 @@ class FakeSignedClient:
         raise AssertionError(path)
 
     def post(self, *args, **kwargs):
-        raise AccountApiError(LIVE_TRADING_MESSAGE)
+        if not self.orders_enabled:
+            raise AccountApiError(LIVE_TRADING_MESSAGE)
+        return {}, 1.0
+
+    def create_order(self, **kwargs):
+        if not self.orders_enabled:
+            raise AccountApiError(LIVE_TRADING_MESSAGE)
+        self.created_orders.append(kwargs)
+        contracts = kwargs.get("contracts", 1)
+        price = kwargs.get("price", 0.5)
+        return {
+            "order_id": "live-1",
+            "fill_count": f"{float(contracts):.2f}",
+            "remaining_count": "0.00",
+            "average_fill_price": f"{float(price):.4f}",
+            "average_fee_paid": "0.0100",
+            "ts_ms": 1,
+        }, 5.0
+
+    def cancel_order(self, order_id, ticker=None):
+        if not self.orders_enabled:
+            raise AccountApiError(LIVE_TRADING_MESSAGE)
+        return {"order_id": order_id, "reduced_by": "0.00", "ts_ms": 1}, 1.0
 
 
 class SignedClientHttpTests(unittest.TestCase):
@@ -298,9 +322,52 @@ class SignedClientHttpTests(unittest.TestCase):
         self.assertGreaterEqual(latency_ms, 0.0)
         with self.assertRaises(AccountApiError) as ctx:
             client.post("/portfolio/events/orders", json={})
-        self.assertIn("coming soon", str(ctx.exception))
+        self.assertIn("Live order placement is off", str(ctx.exception))
         with self.assertRaises(AccountApiError):
-            client.create_order()
+            client.create_order(ticker="T", side="buy", contracts=1, price=0.5)
+
+    def test_signed_create_order_posts_v2_path(self):
+        key = _rsa_key()
+        creds = _creds(key)
+        seen = {}
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            seen["method"] = request.method
+            seen["url"] = str(request.url)
+            seen["headers"] = dict(request.headers)
+            seen["body"] = request.content
+            path = "/trade-api/v2/portfolio/events/orders"
+            _verify(
+                key,
+                request.headers["KALSHI-ACCESS-TIMESTAMP"],
+                "POST",
+                path,
+                request.headers["KALSHI-ACCESS-SIGNATURE"],
+            )
+            return httpx.Response(
+                201,
+                json={
+                    "order_id": "ord-1",
+                    "fill_count": "1.00",
+                    "remaining_count": "0.00",
+                    "average_fill_price": "0.5600",
+                    "ts_ms": 1,
+                },
+            )
+
+        http = httpx.Client(transport=httpx.MockTransport(handler), base_url=DEMO_BASE_URL)
+        client = KalshiSignedClient(creds, client=http, orders_enabled=True)
+        payload, latency_ms = client.create_order(
+            ticker="HIGHNY-24JAN01-T60",
+            side="buy",
+            contracts=1,
+            price=0.56,
+        )
+        self.assertEqual(payload["order_id"], "ord-1")
+        self.assertGreaterEqual(latency_ms, 0.0)
+        self.assertEqual(seen["method"], "POST")
+        self.assertTrue(seen["url"].endswith("/portfolio/events/orders"))
+        self.assertIn("bid", seen["body"].decode("utf-8"))
 
     def test_unauthorized_is_sanitized(self):
         creds = _creds()

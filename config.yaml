@@ -1,6 +1,7 @@
 # Paper-trading config for Kalshi tennis and Bitcoin markets.
-# Live order submission stays disabled. Do not size up until paper P&L
-# is positive on a large sample (see sizing.min_fills_before_size_up).
+# Live order placement is opt-in from the dashboard (Connect + confirmation)
+# with hard caps. Do not size up until paper P&L is positive on a large
+# sample (see sizing.min_fills_before_size_up).
 
 kalshi:
   base_url: https://external-api.kalshi.com/trade-api/v2
@@ -90,6 +91,10 @@ account:
   environment: prod
 
 live:
-  # Must stay false. LiveKalshiExecution raises if called.
-  # Connecting an account does NOT enable this.
+  # Default off. Dashboard Live toggle is required even if this is true.
+  # CLI paper-run never posts orders. Hard ceilings live in code ($10/trade,
+  # $25 daily loss) and cannot be raised from this file.
   enabled: false
+  max_dollars_per_ticker: 5.0
+  daily_loss_limit: 10.0
+  state_path: data/live_state.json

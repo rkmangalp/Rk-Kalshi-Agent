@@ -59,6 +59,9 @@
     btnConnect: $("btn-connect"),
     btnDisconnect: $("btn-disconnect"),
     enableLiveTrading: $("enable-live-trading"),
+    confirmLiveMoney: $("confirm-live-money"),
+    liveWarning: $("live-warning"),
+    modeBanner: $("mode-banner"),
     viewChip: $("view-chip"),
     autoAccount: $("auto-account"),
     btnAccountRefresh: $("btn-account-refresh"),
@@ -180,7 +183,13 @@
       els.btnClearSession.hidden = !enabled;
       els.btnClearSession.disabled = !enabled;
     }
+    if (els.enableLiveTrading) els.enableLiveTrading.disabled = !enabled || els.enableLiveTrading.dataset.locked === "1";
+    if (els.confirmLiveMoney) {
+      const liveOn = Boolean(els.enableLiveTrading && els.enableLiveTrading.checked);
+      els.confirmLiveMoney.disabled = !enabled || !liveOn;
+    }
     els.startPanel.classList.toggle("is-running", !enabled);
+    paintStartButton();
   }
 
   function renderLog(lines) {
@@ -301,13 +310,20 @@
     const series = (status.series_tickers || []).join(", ");
     const account = status.account || {};
     const algo = status.signal_algorithm || "Avellaneda–Stoikov + OBI";
+    const liveOn = Boolean(status.live_enabled);
     els.footer.textContent =
-      `localhost · paper_mode=true · live.enabled=false · ${algo} · account=${account.status || "disconnected"} · btc=${status.trade_bitcoin} tennis=${status.trade_tennis} · live_matches_only=${status.live_matches_only} · series ${series} · edge ${status.edge_threshold_cents}¢`;
+      `localhost · paper_mode=${liveOn ? "false" : "true"} · live.enabled=${liveOn} · ${algo} · account=${account.status || "disconnected"} · btc=${status.trade_bitcoin} tennis=${status.trade_tennis} · live_matches_only=${status.live_matches_only} · series ${series} · edge ${status.edge_threshold_cents}¢`;
     const signalNote = $("signal-note");
     if (signalNote && status.signal_algorithm) {
-      signalNote.textContent = `${status.signal_algorithm} · paper only · not a predictor`;
+      signalNote.textContent = `${status.signal_algorithm} · ${liveOn ? "LIVE real money" : "paper only"} · not a predictor`;
     }
-    renderAccountStatus(account, status.account_environment_default);
+    if (els.modeBanner) {
+      els.modeBanner.textContent = status.banner
+        || (liveOn ? "LIVE TRADING — real money" : "PAPER MODE ONLY — paper desk — no live orders");
+      els.modeBanner.className = liveOn ? "banner paper-banner is-live" : "banner paper-banner";
+    }
+    renderAccountStatus(account, status.account_environment_default, status);
+    paintStartButton();
     if (!els.startForm.dataset.seeded) {
       if (status.starting_cash != null) els.startingCash.value = status.starting_cash;
       if (status.max_dollars_per_ticker != null) els.maxPerTrade.value = status.max_dollars_per_ticker;
@@ -339,8 +355,8 @@
         : categoryBookLabel(status),
     ].filter(Boolean).join(" · ") || "no books selected";
     els.startHint.textContent = running
-      ? `Paper session running (${books} · ${status.trade_style || "active"}) — Stop ends polling. Clear wipes the local paper session, not a live Kalshi account.`
-      : `Mode ${status.trade_style || "active"} · paper bankroll $${fmt(status.starting_cash, 0)} · max $${fmt(status.max_dollars_per_ticker, 0)}/trade · daily loss $${fmt(status.daily_loss_limit, 0)} · ${books}`;
+      ? `${liveOn ? "LIVE" : "Paper"} session running (${books} · ${status.trade_style || "active"}) — Stop ends polling. Clear wipes the local paper session, not a live Kalshi account.`
+      : `Mode ${status.trade_style || "active"} · ${liveOn ? "LIVE real money" : "paper"} · max $${fmt(status.max_dollars_per_ticker, 0)}/trade · daily loss $${fmt(status.daily_loss_limit, 0)} · ${books}`;
   }
 
   function renderTarget(target) {
@@ -522,7 +538,34 @@
     renderLog(run.logs);
   }
 
-  function renderAccountStatus(account, defaultEnv) {
+  function liveIntent() {
+    return Boolean(
+      els.enableLiveTrading && els.enableLiveTrading.checked
+      && els.confirmLiveMoney && els.confirmLiveMoney.checked
+    );
+  }
+
+  function paintStartButton() {
+    if (!els.btnStart) return;
+    els.btnStart.textContent = liveIntent() ? "Start LIVE (real money)" : "Start";
+    els.btnStart.classList.toggle("live-start", liveIntent());
+  }
+
+  function clampLiveInputs(caps) {
+    if (!caps) return;
+    const ceiling = Number(caps.max_dollars_hard_ceiling);
+    const dailyCeil = Number(caps.daily_loss_hard_ceiling);
+    if (els.maxPerTrade && Number.isFinite(ceiling)) {
+      const cur = Number(els.maxPerTrade.value);
+      if (Number.isFinite(cur) && cur > ceiling) els.maxPerTrade.value = ceiling;
+    }
+    if (els.dailyLoss && Number.isFinite(dailyCeil)) {
+      const cur = Number(els.dailyLoss.value);
+      if (Number.isFinite(cur) && cur > dailyCeil) els.dailyLoss.value = dailyCeil;
+    }
+  }
+
+  function renderAccountStatus(account, defaultEnv, dashboardStatus) {
     const status = (account && account.status) || "disconnected";
     const label = status === "connected" ? "Connected" : status === "error" ? "Error" : "Disconnected";
     if (els.accountConn) {
@@ -555,16 +598,27 @@
       if (account.message) {
         els.accountHint.textContent = account.message;
       } else if (status === "connected") {
-        els.accountHint.textContent = `Read-only${suffix}. Live trading stays off.`;
+        els.accountHint.textContent = `Connected${suffix}. Enable Live only if you intend to spend real money.`;
       } else {
         els.accountHint.textContent =
           "Set KALSHI_API_KEY_ID and KALSHI_PRIVATE_KEY_PATH in a local .env (never paste keys in the UI).";
       }
     }
+    const connected = status === "connected";
     if (els.enableLiveTrading) {
-      els.enableLiveTrading.checked = false;
-      els.enableLiveTrading.disabled = true;
+      els.enableLiveTrading.disabled = !connected || running;
+      els.enableLiveTrading.dataset.locked = connected ? "0" : "1";
+      if (!connected) els.enableLiveTrading.checked = false;
     }
+    if (els.confirmLiveMoney) {
+      const liveChecked = Boolean(els.enableLiveTrading && els.enableLiveTrading.checked);
+      els.confirmLiveMoney.disabled = !connected || !liveChecked || running;
+      if (!connected || !liveChecked) els.confirmLiveMoney.checked = false;
+    }
+    if (dashboardStatus && dashboardStatus.live_caps && liveIntent()) {
+      clampLiveInputs(dashboardStatus.live_caps);
+    }
+    paintStartButton();
     if (els.btnDisconnect) els.btnDisconnect.disabled = status === "disconnected" && !account.api_key_id_suffix;
   }
 
@@ -707,6 +761,9 @@
     try {
       const payload = await fetchJSON("/api/account/disconnect", { method: "POST" });
       renderAccountStatus(payload.account || { status: "disconnected" });
+      if (els.enableLiveTrading) els.enableLiveTrading.checked = false;
+      if (els.confirmLiveMoney) els.confirmLiveMoney.checked = false;
+      paintStartButton();
       emptyLiveTables("Connect to load live positions.");
       if (els.accountMeta) els.accountMeta.textContent = "disconnected";
     } catch (err) {
@@ -791,7 +848,10 @@
           category_id: (els.categorySelect && els.categorySelect.value) || "all",
           ...contractStartFields(),
           ...categoryTradeFlags(),
-          mode: "paper",
+          live: liveIntent(),
+          confirm_live: liveIntent(),
+          understand_real_money: liveIntent(),
+          mode: liveIntent() ? "live" : "paper",
         }),
       });
       if (payload.run) renderRun(payload.run);
@@ -925,7 +985,54 @@
     });
   }
   if (els.tradeStyle) {
-    els.tradeStyle.addEventListener("change", () => applyTradeStyleDefaults());
+    els.tradeStyle.addEventListener("change", () => {
+      applyTradeStyleDefaults();
+      if (liveIntent()) {
+        fetchJSON("/api/status").then((status) => {
+          if (status.live_caps) clampLiveInputs(status.live_caps);
+        }).catch(() => {});
+      }
+    });
+  }
+  async function syncLiveArm() {
+    paintStartButton();
+    const want = liveIntent();
+    if (els.confirmLiveMoney) {
+      els.confirmLiveMoney.disabled = !(els.enableLiveTrading && els.enableLiveTrading.checked) || running;
+      if (!(els.enableLiveTrading && els.enableLiveTrading.checked)) {
+        els.confirmLiveMoney.checked = false;
+      }
+    }
+    try {
+      const payload = await fetchJSON("/api/live", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          enabled: want,
+          confirm_live: want,
+          understand_real_money: want,
+        }),
+      });
+      if (payload.account) renderAccountStatus(payload.account, null, payload);
+      if (payload.live_caps && want) clampLiveInputs(payload.live_caps);
+      if (els.modeBanner && payload.banner) {
+        els.modeBanner.textContent = payload.banner;
+        els.modeBanner.className = payload.live_enabled || payload.live_armed
+          ? "banner paper-banner is-live"
+          : "banner paper-banner";
+      }
+    } catch (err) {
+      if (els.enableLiveTrading) els.enableLiveTrading.checked = false;
+      if (els.confirmLiveMoney) els.confirmLiveMoney.checked = false;
+      if (els.accountHint) els.accountHint.textContent = err.message;
+      paintStartButton();
+    }
+  }
+  if (els.enableLiveTrading) {
+    els.enableLiveTrading.addEventListener("change", () => { syncLiveArm(); });
+  }
+  if (els.confirmLiveMoney) {
+    els.confirmLiveMoney.addEventListener("change", () => { syncLiveArm(); });
   }
   if (els.btnClearLogs) {
     els.btnClearLogs.addEventListener("click", () => clearLogs());

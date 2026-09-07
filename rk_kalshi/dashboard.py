@@ -1,6 +1,6 @@
 """Local FastAPI dashboard wrapping the paper-trade stack.
 
-Binds to localhost by default. Live order submission is never exposed.
+Binds to localhost by default. Live order submission is opt-in with hard caps.
 """
 
 from __future__ import annotations
@@ -28,7 +28,6 @@ from rk_kalshi.account import (
     AccountApiError,
     AccountNotConnectedError,
     AccountService,
-    LIVE_TRADING_MESSAGE,
     default_store_path,
 )
 from rk_kalshi.auth import AccountAuthError
@@ -44,6 +43,15 @@ from rk_kalshi.client import KalshiPublicClient
 from rk_kalshi.config import AppConfig, load_config
 from rk_kalshi.journal import clear_fill_logs, read_fills, summarize_pnl
 from rk_kalshi.kalshi_url import EXAMPLE_CONTRACT_URLS, KalshiUrlError, parse_contract
+from rk_kalshi.live_caps import (
+    LIVE_CONFIRM_MESSAGE,
+    LIVE_CONNECT_REQUIRED,
+    LiveStartError,
+    clamp_live_daily_loss,
+    clamp_live_dollars,
+    live_caps_payload,
+    require_live_credentials,
+)
 from rk_kalshi.models import MarketSnapshot, select_bitcoin_tradeable
 from rk_kalshi.presets import (
     apply_trade_style,
@@ -79,9 +87,15 @@ _LOOPBACK = {"127.0.0.1", "localhost", "::1"}
 
 def _reject_live(live: bool | None, mode: str | None) -> None:
     if live is True:
-        raise ValueError("live trading is disabled; paper mode only")
+        raise ValueError("this endpoint is paper-only; use Start with Live confirmation to place real orders")
     if mode is not None and str(mode).strip().lower() == "live":
-        raise ValueError("live trading is disabled; paper mode only")
+        raise ValueError("this endpoint is paper-only; use Start with Live confirmation to place real orders")
+
+
+def _wants_live(live: bool | None, mode: str | None) -> bool:
+    if live is True:
+        return True
+    return mode is not None and str(mode).strip().lower() == "live"
 
 
 class RunRequest(BaseModel):
@@ -114,10 +128,15 @@ class StartRequest(BaseModel):
     category_id: str | None = None
     live: bool | None = None
     mode: str | None = None
+    confirm_live: bool = False
+    understand_real_money: bool = False
 
     @model_validator(mode="after")
-    def reject_live(self) -> "StartRequest":
-        _reject_live(self.live, self.mode)
+    def live_requires_confirmation(self) -> "StartRequest":
+        if not _wants_live(self.live, self.mode):
+            return self
+        if not (self.confirm_live and self.understand_real_money):
+            raise ValueError(LIVE_CONFIRM_MESSAGE)
         return self
 
 
@@ -135,7 +154,9 @@ class ConnectRequest(BaseModel):
     def reject_live_and_pasted_secrets(self) -> "ConnectRequest":
         _reject_live(self.live, self.mode)
         if self.enable_live_trading:
-            raise ValueError(LIVE_TRADING_MESSAGE)
+            raise ValueError(
+                "Connecting does not enable live orders. Use the Live toggle after Connect."
+            )
         pasted = any(
             str(value or "").strip()
             for value in (self.api_key_id, self.private_key_path, self.private_key_pem, self.openai_api_key)
@@ -155,9 +176,16 @@ class ContractRequest(BaseModel):
     live: bool | None = None
     mode: str | None = None
 
+
+class LiveArmRequest(BaseModel):
+    enabled: bool = False
+    confirm_live: bool = False
+    understand_real_money: bool = False
+
     @model_validator(mode="after")
-    def reject_live(self) -> "ContractRequest":
-        _reject_live(self.live, self.mode)
+    def confirm_when_enabling(self) -> "LiveArmRequest":
+        if self.enabled and not (self.confirm_live and self.understand_real_money):
+            raise ValueError(LIVE_CONFIRM_MESSAGE)
         return self
 
 
@@ -193,7 +221,7 @@ class RunController:
                 "started_at": self.started_at,
                 "finished_at": self.finished_at,
                 "logs": list(self.logs),
-                "mode": "paper",
+                "mode": "live" if self.cfg.live_enabled else "paper",
             }
 
     def start(
@@ -231,7 +259,7 @@ class RunController:
                 return self.snapshot()
             self.stopping = True
         self._stop.set()
-        self._log("stop requested — finishing current cycle (paper mode)")
+        self._log("stop requested — finishing current cycle")
         return self.snapshot()
 
     def clear_logs(self) -> dict[str, Any]:
@@ -249,7 +277,7 @@ class RunController:
             self.cycles_done = 0
             self.started_at = None
             self.finished_at = None
-        self._log("paper session cleared — local paper data only; no live Kalshi account")
+        self._log("paper session cleared — local paper data only; live Kalshi account is unchanged")
         return self.snapshot()
 
     def _log(self, message: str) -> None:
@@ -267,21 +295,24 @@ class RunController:
         try:
             if continuous:
                 target = self.cfg.target_event_ticker or self.cfg.target_label
+                desk = "LIVE (real money)" if self.cfg.live_enabled else "PAPER MODE"
+                caps = (
+                    f"max ${self.cfg.max_dollars_per_ticker:g}/trade · "
+                    f"daily kill ${self.cfg.daily_loss_limit:g} · can_size_up locked"
+                )
                 if target:
                     kind = self.cfg.target_asset_class or "contract"
                     self._log(
-                        f"PAPER MODE ONLY — Start: paper-trading selected {kind} "
-                        f"{target} only; live orders disabled; can_size_up stays locked"
+                        f"{desk} — Start: {kind} {target} only; {caps}"
                     )
                 else:
                     self._log(
-                        "PAPER MODE ONLY — Start: polling Bitcoin (buy+sell YES) and "
-                        "tennis until Stop; live orders disabled; can_size_up stays locked"
+                        f"{desk} — Start: polling selected books until Stop; {caps}"
                     )
             else:
+                desk = "LIVE (real money)" if self.cfg.live_enabled else "PAPER MODE ONLY"
                 self._log(
-                    f"PAPER MODE ONLY — starting {cycles} cycle(s); "
-                    "live orders disabled; can_size_up stays locked"
+                    f"{desk} — starting {cycles} cycle(s); can_size_up stays locked"
                 )
             index = 0
             while not self._stop.is_set():
@@ -326,17 +357,26 @@ class RunController:
                     self.fills_this_run += len(fills)
                 if fills:
                     for fill in fills:
+                        tag = "LIVE FILL" if fill.mode == "live" else "FILL"
                         self._log(
-                            f"FILL {fill.side:4} {fill.ticker} mid={fill.live_mid:.4f} "
+                            f"{tag} {fill.side:4} {fill.ticker} mid={fill.live_mid:.4f} "
                             f"edge={fill.edge_cents:.2f}¢ pnl={fill.running_pnl:.4f} "
                             f"can_size_up={fill.can_size_up}"
                         )
                         self._log(f"  thesis: {fill.edge_thesis}")
                 else:
-                    self._log(
-                        "no paper fills: net edge after spread+fee did not clear "
-                        "threshold, or risk blocked"
-                    )
+                    err = (getattr(self.runner, "last_scan", None) or {}).get("live_error")
+                    if self.cfg.live_enabled:
+                        extra = f" ({err})" if err else ""
+                        self._log(
+                            "no live fills: net edge after spread+fee did not clear "
+                            f"threshold, risk blocked, or the order did not fill{extra}"
+                        )
+                    else:
+                        self._log(
+                            "no paper fills: net edge after spread+fee did not clear "
+                            "threshold, or risk blocked"
+                        )
                 index += 1
                 if not continuous and index >= cycles:
                     break
@@ -385,6 +425,11 @@ class DashboardService:
         )
         self.owns_account = account is None
         self.last_contract_error = ""
+        self._paper_state_path = cfg.state_path
+        self._paper_fill_csv = cfg.fill_log_csv
+        self._paper_fill_jsonl = cfg.fill_log_jsonl
+        self.runner.signed_client = self.account.signed_client()
+        self.runner.bind_execution()
 
     def target_payload(self, cfg: AppConfig | None = None) -> dict[str, Any]:
         return _target_payload(cfg or self.cfg, self.last_contract_error)
@@ -409,6 +454,9 @@ class DashboardService:
             runner.risk.cfg = cfg
         if getattr(runner, "paper", None) is not None:
             runner.paper.cfg = cfg
+        runner.signed_client = self.account.signed_client()
+        if hasattr(runner, "bind_execution"):
+            runner.bind_execution()
 
     def apply_session(
         self,
@@ -426,9 +474,16 @@ class DashboardService:
         target_label: str | None = None,
         trade_style: str | None = None,
         category_id: str | None = None,
+        live: bool = False,
     ) -> dict[str, Any]:
         sleep_s = self.cfg.cycle_sleep_s if cycle_sleep_s is None else cycle_sleep_s
-        cfg = replace(self.cfg, live_enabled=False)
+        cfg = replace(
+            self.cfg,
+            live_enabled=False,
+            state_path=self._paper_state_path,
+            fill_log_csv=self._paper_fill_csv,
+            fill_log_jsonl=self._paper_fill_jsonl,
+        )
         if (trade_style or "").strip():
             cfg = apply_trade_style(cfg, trade_style)
         if (category_id or "").strip():
@@ -454,14 +509,28 @@ class DashboardService:
             target_label=self.cfg.target_label if target_label is None else target_label,
             target_asset_class=self.cfg.target_asset_class,
             live_enabled=False,
+            allow_size_up=False,
         )
+        if live:
+            cfg = self._live_cfg(cfg, max_dollars_per_ticker, daily_loss_limit)
         self.bind_config(cfg)
         applied = _apply_bankroll_state(cfg)
-        persisted = _persist_session(cfg, self.config_path)
+        persist_cfg = replace(
+            cfg,
+            live_enabled=False,
+            state_path=self._paper_state_path,
+            fill_log_csv=self._paper_fill_csv,
+            fill_log_jsonl=self._paper_fill_jsonl,
+            max_dollars_per_ticker=float(max_dollars_per_ticker),
+            daily_loss_limit=float(daily_loss_limit),
+        )
+        persisted = _persist_session(persist_cfg, self.config_path)
         preset = preset_for(cfg.trade_style)
         return {
-            "paper_mode": True,
-            "live_enabled": False,
+            "paper_mode": not cfg.live_enabled,
+            "live_enabled": bool(cfg.live_enabled),
+            "live_armed": self.account.orders_enabled,
+            "live_caps": live_caps_payload(),
             "starting_cash": cfg.starting_cash,
             "max_dollars_per_ticker": cfg.max_dollars_per_ticker,
             "daily_loss_limit": cfg.daily_loss_limit,
@@ -496,13 +565,12 @@ class DashboardService:
                 target_market_ticker="",
                 target_label="",
                 target_asset_class="",
-                live_enabled=False,
             )
             self.bind_config(cfg)
             _persist_session(cfg, self.config_path)
             return {
-                "paper_mode": True,
-                "live_enabled": False,
+                "paper_mode": not cfg.live_enabled,
+                "live_enabled": bool(cfg.live_enabled),
                 "contract": None,
                 "target": self.target_payload(cfg),
             }
@@ -522,25 +590,85 @@ class DashboardService:
             target_asset_class=parsed.asset_class,
             trade_tennis=True if parsed.asset_class == "tennis" else self.cfg.trade_tennis,
             trade_bitcoin=True if parsed.asset_class == "bitcoin" else self.cfg.trade_bitcoin,
-            live_enabled=False,
         )
         self.bind_config(cfg)
         _persist_session(cfg, self.config_path)
         return {
-            "paper_mode": True,
-            "live_enabled": False,
+            "paper_mode": not cfg.live_enabled,
+            "live_enabled": bool(cfg.live_enabled),
             "contract": parsed.as_dict() | {"label": label},
             "target": self.target_payload(cfg),
         }
 
+    def arm_live(self) -> dict[str, Any]:
+        status = self.account.snapshot()
+        if status.get("status") != "connected":
+            raise LiveStartError(LIVE_CONNECT_REQUIRED)
+        creds = self.account.credentials()
+        require_live_credentials(creds)
+        return self.account.set_orders_enabled(True)
+
+    def disarm_live(self) -> dict[str, Any]:
+        live_exec = getattr(self.runner, "live", None)
+        if live_exec is not None:
+            try:
+                live_exec.cancel_open()
+            except Exception:
+                pass
+        snapshot = self.account.set_orders_enabled(False)
+        if self.cfg.live_enabled:
+            cfg = replace(
+                self.cfg,
+                live_enabled=False,
+                state_path=self._paper_state_path,
+                fill_log_csv=self._paper_fill_csv,
+                fill_log_jsonl=self._paper_fill_jsonl,
+            )
+            self.bind_config(cfg)
+        return snapshot
+
+    def _live_cfg(self, cfg: AppConfig, max_dollars: float, daily_loss: float) -> AppConfig:
+        live_cfg = replace(
+            cfg,
+            live_enabled=True,
+            allow_size_up=False,
+            allow_martingale=False,
+            max_dollars_per_ticker=clamp_live_dollars(max_dollars),
+            daily_loss_limit=clamp_live_daily_loss(daily_loss),
+            state_path=cfg.live_state_path,
+        )
+        return self._seed_live_state(live_cfg)
+
+    def _seed_live_state(self, cfg: AppConfig) -> AppConfig:
+        path = cfg.state_path
+        if path.exists() and path.stat().st_size > 0:
+            return cfg
+        cash = cfg.starting_cash
+        try:
+            book = self.account.portfolio()
+            if book.get("balance") is not None:
+                cash = float(book["balance"])
+        except Exception:
+            pass
+        seeded = replace(cfg, starting_cash=cash)
+        save_state(seeded, new_state(seeded))
+        return seeded
+
     def clear_session(self) -> dict[str, Any]:
         if self.controller.snapshot()["running"]:
             raise HTTPException(status_code=409, detail="Stop the paper-run before Clear")
-        archived = _archive_paper_session(self.cfg)
-        clear_fill_logs(self.cfg.fill_log_csv, self.cfg.fill_log_jsonl)
-        save_state(self.cfg, new_state(self.cfg))
-        cfg = replace(
+        paper_cfg = replace(
             self.cfg,
+            state_path=self._paper_state_path,
+            fill_log_csv=self._paper_fill_csv,
+            fill_log_jsonl=self._paper_fill_jsonl,
+            live_enabled=False,
+        )
+        archived = _archive_paper_session(paper_cfg)
+        clear_fill_logs(paper_cfg.fill_log_csv, paper_cfg.fill_log_jsonl)
+        save_state(paper_cfg, new_state(paper_cfg))
+        cfg = replace(
+            paper_cfg,
             target_url="",
             target_event_ticker="",
             target_market_ticker="",
@@ -781,20 +909,42 @@ def _pnl_payload(service: DashboardService) -> dict[str, Any]:
     summary["min_fills_before_size_up"] = service.cfg.min_fills_before_size_up
     summary["max_dollars_per_ticker"] = service.cfg.max_dollars_per_ticker
     summary["daily_loss_limit"] = service.cfg.daily_loss_limit
-    summary["paper_mode"] = True
-    summary["live_enabled"] = False
+    summary["paper_mode"] = not service.cfg.live_enabled
+    summary["live_enabled"] = bool(service.cfg.live_enabled)
     return summary
+
+
+def _mode_flags(service: DashboardService) -> dict[str, Any]:
+    live_on = bool(service.cfg.live_enabled)
+    account = service.account.snapshot()
+    connected = account.get("status") == "connected"
+    armed = bool(service.account.orders_enabled) and connected
+    if live_on:
+        banner = (
+            f"LIVE TRADING — real money · max ${service.cfg.max_dollars_per_ticker:g}/trade · "
+            f"daily kill ${service.cfg.daily_loss_limit:g}"
+        )
+    elif armed:
+        banner = "LIVE ARMED — next Start can spend real money; paper remains selectable"
+    else:
+        banner = "PAPER MODE ONLY — no live orders"
+    return {
+        "paper_mode": not live_on,
+        "mode": "live" if live_on else "paper",
+        "banner": banner,
+        "live_enabled": live_on,
+        "live_armed": armed,
+        "live_trading_available": connected,
+        "live_caps": live_caps_payload(),
+    }
 
 
 def _status_payload(service: DashboardService) -> dict[str, Any]:
     state = load_state(service.cfg)
     risk = RiskManager(service.cfg)
+    flags = _mode_flags(service)
     return {
-        "paper_mode": True,
-        "mode": "paper",
-        "banner": "PAPER MODE ONLY — no live orders",
-        "live_enabled": False,
-        "live_trading_available": False,
+        **flags,
         "can_size_up": risk.can_size_up(state),
         "allow_size_up": service.cfg.allow_size_up,
         "min_fills_before_size_up": service.cfg.min_fills_before_size_up,
@@ -848,6 +998,7 @@ def create_app(
     elif config_path is not None:
         config_path = Path(config_path)
     cfg = _cfg_from_session(cfg)
+    cfg = replace(cfg, live_enabled=False)
     service = DashboardService(
         cfg, client=client, runner=runner, config_path=config_path, account=account
     )
@@ -861,7 +1012,8 @@ def create_app(
         title="Rk Kalshi Paper Desk",
         description=(
             "Local paper-trading dashboard. Signal is Avellaneda–Stoikov + "
-            "order-book imbalance. Live orders are disabled. Not financial advice."
+            "order-book imbalance. Live orders are opt-in with hard caps. "
+            "Not financial advice."
         ),
         lifespan=lifespan,
     )
@@ -885,11 +1037,11 @@ def create_app(
 
     @app.get("/api/health")
     def health() -> dict[str, Any]:
+        flags = _mode_flags(service)
         return {
             "ok": True,
-            "paper_mode": True,
-            "live_enabled": False,
             "account": service.account.snapshot(),
+            **flags,
         }
 
     @app.get("/api/status")
@@ -988,6 +1140,12 @@ def create_app(
                 raise
         elif category:
             service.set_contract(ContractRequest())
+        wants_live = _wants_live(body.live, body.mode)
+        if wants_live:
+            try:
+                service.arm_live()
+            except LiveStartError as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
         session = service.apply_session(
             starting_cash=body.starting_cash,
             max_dollars_per_ticker=body.max_dollars_per_ticker,
@@ -999,6 +1157,7 @@ def create_app(
             signal_mode=body.signal_mode,
             trade_style=body.trade_style,
             category_id=body.category_id,
+            live=wants_live,
         )
         continuous = bool(body.continuous) or body.cycles is None
         cycles = 1 if continuous else int(body.cycles or 1)
@@ -1006,11 +1165,30 @@ def create_app(
             run = service.controller.start(cycles, body.sleep_s, continuous=continuous)
         except RuntimeError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
-        return {"session": session, "run": run, "paper_mode": True, "live_enabled": False}
+        flags = _mode_flags(service)
+        return {"session": session, "run": run, **flags}
 
     @app.post("/api/stop")
     def stop_session() -> dict[str, Any]:
+        live_exec = getattr(service.runner, "live", None)
+        if live_exec is not None:
+            try:
+                live_exec.cancel_open()
+            except Exception:
+                pass
         return service.controller.stop()
+
+    @app.post("/api/live")
+    def arm_or_disarm_live(body: LiveArmRequest) -> dict[str, Any]:
+        try:
+            if body.enabled:
+                account = service.arm_live()
+            else:
+                account = service.disarm_live()
+        except LiveStartError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        flags = _mode_flags(service)
+        return {"account": account, **flags}
 
     @app.post("/api/logs/clear")
     def clear_logs() -> dict[str, Any]:
@@ -1085,15 +1263,17 @@ def create_app(
             "paper_mode": True,
             "live_enabled": False,
             "read_only": True,
-            "note": "Connected for read-only portfolio view. Live order placement stays disabled.",
+            "note": "Connected for portfolio view. Enable Live separately to place real orders.",
         }
 
     @app.post("/api/account/disconnect")
     def account_disconnect() -> dict[str, Any]:
+        service.disarm_live()
         return {
             "account": service.account.disconnect(),
             "paper_mode": True,
             "live_enabled": False,
+            "live_armed": False,
         }
 
     @app.get("/api/account/portfolio")
@@ -1124,11 +1304,11 @@ def serve(
     app = create_app(cfg, config_path=config_path)
     if host not in _LOOPBACK:
         print(
-            "warning: binding beyond localhost; the UI still cannot place live orders",
+            "warning: binding beyond localhost; live orders still require the dashboard Live toggle",
             flush=True,
         )
     url = f"http://{host}:{port}/"
-    print("PAPER MODE ONLY — no live orders", flush=True)
+    print("PAPER MODE default — live orders opt-in with hard caps", flush=True)
     print(f"dashboard: {url}", flush=True)
     if open_browser:
         webbrowser.open(url)

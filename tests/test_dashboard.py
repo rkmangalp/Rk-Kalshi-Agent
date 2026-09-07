@@ -148,7 +148,9 @@ class DashboardApiTests(unittest.TestCase):
         self.assertIn("btn-connect", response.text)
         self.assertIn("btn-disconnect", response.text)
         self.assertIn("live-trades-panel", response.text)
-        self.assertIn("Enable live trading (coming soon)", response.text)
+        self.assertIn("Enable live trading (real money)", response.text)
+        self.assertIn("I understand this spends real money", response.text)
+        self.assertIn("Live losses are real", response.text)
         self.assertIn("account-banner", response.text)
         self.assertIn("Live account view", response.text)
         self.assertIn("paper desk", response.text.lower())
@@ -599,7 +601,7 @@ class DashboardApiTests(unittest.TestCase):
         self.assertFalse(body["live_enabled"])
         self.assertTrue(body["read_only"])
         self.assertEqual(body["account"]["status"], "connected")
-        self.assertIn("read-only", body["note"].lower())
+        self.assertIn("Enable Live separately", body["note"])
 
         book = self.http.get("/api/account/portfolio")
         self.assertEqual(book.status_code, 200)
@@ -611,7 +613,7 @@ class DashboardApiTests(unittest.TestCase):
         status = self.http.get("/api/status").json()
         self.assertEqual(status["account"]["status"], "connected")
         self.assertFalse(status["live_enabled"])
-        self.assertFalse(status["live_trading_available"])
+        self.assertTrue(status["live_trading_available"])
 
         gone = self.http.post("/api/account/disconnect")
         self.assertEqual(gone.status_code, 200)
@@ -737,6 +739,64 @@ class DashboardApiTests(unittest.TestCase):
         self.assertEqual(status["trade_style"], "aggressive")
         self.assertEqual(status["target_category_id"], "atp")
         self.assertFalse(status["live_enabled"])
+
+    def test_live_arm_requires_connect_and_clamps_caps(self):
+        from tests.test_account import FakeSignedClient, _pem, _rsa_key
+        from unittest.mock import patch
+
+        refused = self.http.post(
+            "/api/live",
+            json={"enabled": True, "confirm_live": True, "understand_real_money": True},
+        )
+        self.assertEqual(refused.status_code, 400)
+        self.assertIn("Connect", refused.json()["detail"])
+
+        unconfirmed = self.http.post("/api/live", json={"enabled": True})
+        self.assertEqual(unconfirmed.status_code, 422)
+
+        key_path = Path(self.tmp.name) / "kalshi.key"
+        key_path.write_text(_pem(_rsa_key()), encoding="utf-8")
+        env = {
+            "KALSHI_API_KEY_ID": "a952bcbe-ec3b-4b5b-b8f9-11dae589608c",
+            "KALSHI_PRIVATE_KEY_PATH": str(key_path),
+            "KALSHI_ENVIRONMENT": "demo",
+        }
+        with patch.dict("os.environ", env, clear=False):
+            with patch("rk_kalshi.account.KalshiSignedClient", FakeSignedClient):
+                connected = self.http.post("/api/account/connect", json={"mode": "paper"})
+                self.assertEqual(connected.status_code, 200)
+                armed = self.http.post(
+                    "/api/live",
+                    json={"enabled": True, "confirm_live": True, "understand_real_money": True},
+                )
+                self.assertEqual(armed.status_code, 200)
+                self.assertTrue(armed.json()["live_armed"])
+                self.assertFalse(armed.json()["live_enabled"])
+
+                started = self.http.post(
+                    "/api/start",
+                    json={
+                        "starting_cash": 80,
+                        "max_dollars_per_ticker": 25,
+                        "daily_loss_limit": 40,
+                        "sleep_s": 10,
+                        "continuous": True,
+                        "live": True,
+                        "confirm_live": True,
+                        "understand_real_money": True,
+                        "mode": "live",
+                    },
+                )
+                self.assertEqual(started.status_code, 200)
+                body = started.json()
+                self.assertTrue(body["live_enabled"])
+                self.assertFalse(body["paper_mode"])
+                self.assertAlmostEqual(body["session"]["max_dollars_per_ticker"], 10.0)
+                self.assertLessEqual(body["session"]["daily_loss_limit"], 25.0)
+                self.http.post("/api/stop")
+                deadline = time.time() + 4
+                while time.time() < deadline and self.http.get("/api/run").json()["running"]:
+                    time.sleep(0.05)
 
 
 if __name__ == "__main__":

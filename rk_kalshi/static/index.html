@@ -5,10 +5,10 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta http-equiv="Cache-Control" content="no-store">
   <title>Rk Kalshi Paper Desk</title>
-  <link rel="stylesheet" href="/static/app.css?v=uxmodes1">
+  <link rel="stylesheet" href="/static/app.css?v=liveoptin1">
 </head>
 <body>
-  <div class="banner paper-banner" role="status">
+  <div class="banner paper-banner" id="mode-banner" role="status">
     PAPER MODE ONLY — paper desk — no live orders
   </div>
   <div class="banner account-banner is-disconnected" id="account-banner" role="status">
@@ -33,14 +33,14 @@
       <p class="eyebrow">Kalshi account</p>
       <h2>Connect to see live trades</h2>
       <p class="lede">
-        Read-only. <strong>Connect</strong> loads
+        <strong>Connect</strong> loads
         <code>KALSHI_API_KEY_ID</code>,
         <code>KALSHI_PRIVATE_KEY_PATH</code>, and
         <code>KALSHI_ENVIRONMENT</code> from a local
         <code>.env</code> or the process environment — never from this UI.
-        Connecting <strong>does not</strong> enable live order placement.
-        OpenAI / ChatGPT modes also read <code>OPENAI_API_KEY</code> from
-        <code>.env</code> only.
+        Connecting does <strong>not</strong> place orders. Live is a separate
+        opt-in with hard caps. OpenAI / ChatGPT modes also read
+        <code>OPENAI_API_KEY</code> from <code>.env</code> only.
       </p>
     </div>
     <form id="account-form" class="account-form">
@@ -48,10 +48,23 @@
         <span class="conn disconnected" id="account-conn">Disconnected</span>
         <span class="fine" id="account-hint">Set KALSHI_API_KEY_ID and KALSHI_PRIVATE_KEY_PATH in a local .env (never paste keys in the UI).</span>
       </div>
-      <label class="inline coming-soon">
-        <input type="checkbox" id="enable-live-trading" disabled>
-        Enable live trading (coming soon)
-      </label>
+      <div class="live-arm" id="live-arm">
+        <label class="inline">
+          <input type="checkbox" id="enable-live-trading" disabled>
+          Enable live trading (real money)
+        </label>
+        <label class="inline">
+          <input type="checkbox" id="confirm-live-money" disabled>
+          I understand this spends real money on Kalshi
+        </label>
+        <p class="fine live-warning" id="live-warning">
+          Live losses are real. Hard caps (cannot be raised in the live path):
+          max <strong>$5</strong> per trade by default (hard ceiling <strong>$10</strong>),
+          daily loss kill-switch default <strong>$10</strong>.
+          <code>can_size_up</code> stays locked. Never paste API keys in this UI or in chat.
+          Paper mode stays the default until both boxes are checked and you Start.
+        </p>
+      </div>
       <div class="account-actions">
         <button type="button" id="btn-connect" class="primary">Connect</button>
         <button type="button" id="btn-disconnect">Disconnect</button>
@@ -168,8 +181,11 @@
         set a paper bankroll, then Start. Paper signal:
         <strong>Avellaneda–Stoikov reservation price</strong> plus
         <strong>order-book imbalance</strong>, after Kalshi fees and spread.
-        This is simulated cash — the UI cannot place live Kalshi or exchange
-        orders. <strong>Not financial advice</strong> and not a match or price
+        Paper is the default (simulated cash). Live is opt-in after Connect
+        plus both confirmation boxes — then Start spends real money under
+        hard caps. Hybrid / ChatGPT research may inform signals;
+        <strong>risk gates always win</strong>.
+        <strong>Not financial advice</strong> and not a match or price
         predictor. There is <strong>no guaranteed profitable model</strong>.
         <code>can_size_up</code> stays locked. Stop ends polling.
         <strong>Clear</strong> wipes the local paper session (fills, P&amp;L,
@@ -319,7 +335,7 @@
           <button type="button" id="btn-once">Run once</button>
           <button type="button" id="btn-cycles">Run N cycles</button>
         </div>
-        <p class="fine">Advanced: finite cycles. Prefer Start / Stop above. Always paper — no live orders.</p>
+        <p class="fine">Advanced: finite cycles. Prefer Start / Stop above. This control stays paper-only.</p>
       </form>
     </article>
 
@@ -411,9 +427,9 @@
   </section>
 
   <footer>
-    <span id="footer-meta">localhost · paper_mode=true · live.enabled cannot be turned on from this UI</span>
+    <span id="footer-meta">localhost · paper_mode=true · live.enabled=false</span>
   </footer>
 
-  <script src="/static/app.js?v=uxmodes1"></script>
+  <script src="/static/app.js?v=liveoptin1"></script>
 </body>
 </html>

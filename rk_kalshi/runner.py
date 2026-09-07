@@ -5,7 +5,12 @@ import time
 from rk_kalshi.catalog import filter_markets_by_category
 from rk_kalshi.client import KalshiPublicClient
 from rk_kalshi.config import AppConfig
-from rk_kalshi.execution import PaperExecution
+from rk_kalshi.execution import (
+    LiveKalshiExecution,
+    LiveOrderRejected,
+    LiveTradingDisabledError,
+    PaperExecution,
+)
 from rk_kalshi.journal import FillJournal
 from rk_kalshi.models import (
     Fill,
@@ -27,15 +32,21 @@ class PaperRunner:
         cfg: AppConfig,
         client: KalshiPublicClient | None = None,
         llm: LlmResearchTrader | None = None,
+        signed_client=None,
     ):
         self.cfg = cfg
         self.client = client or KalshiPublicClient(cfg)
         self.owns_client = client is None
+        self.signed_client = signed_client
         self.signal = SignalEngine(cfg)
         self.llm = llm if llm is not None else LlmResearchTrader(cfg)
         self.risk = RiskManager(cfg)
         self.paper = PaperExecution(cfg, self.risk)
+        self.live = LiveKalshiExecution(
+            cfg, self.risk, client=signed_client, enabled=bool(cfg.live_enabled)
+        )
         self.journal = FillJournal(cfg.fill_log_csv, cfg.fill_log_jsonl)
+        self.bind_execution()
         self.last_scan: dict = {
             "open": 0,
             "live": 0,
@@ -47,6 +58,17 @@ class PaperRunner:
             "target_market_ticker": "",
             "target_category_id": "",
         }
+
+    def bind_execution(self) -> None:
+        self.risk.cfg = self.cfg
+        self.paper.cfg = self.cfg
+        self.paper.risk = self.risk
+        self.live.cfg = self.cfg
+        self.live.risk = self.risk
+        self.live.client = self.signed_client
+        self.live.enabled = bool(self.cfg.live_enabled) and self.signed_client is not None
+        self.execution = self.live if self.cfg.live_enabled else self.paper
+        self.journal = FillJournal(self.cfg.fill_log_csv, self.cfg.fill_log_jsonl)
 
     def close(self) -> None:
         if self.owns_client:
@@ -152,6 +174,8 @@ class PaperRunner:
         if self.risk.kill_switch_hit(state, marks):
             state.killed = True
             state.kill_reason = state.kill_reason or "daily loss kill-switch"
+            if self.cfg.live_enabled:
+                self.live.cancel_open()
             state.ema = self.signal.dump_ema()
             state.mid_history = self.signal.dump_mids()
             save_state(self.cfg, state)
@@ -185,6 +209,13 @@ class PaperRunner:
         decision = self.risk.approve(signal, state, marks)
         if not decision.ok:
             return None
-        fill = self.paper.execute(signal, state, decision.contracts, latency_ms, marks)
-        self.journal.append(fill)
+        try:
+            fill = self.execution.execute(signal, state, decision.contracts, latency_ms, marks)
+        except (LiveOrderRejected, LiveTradingDisabledError) as exc:
+            self.last_scan["live_error"] = str(exc)
+            return None
+        if fill.mode == "paper":
+            self.journal.append(fill)
+        if state.killed and self.cfg.live_enabled:
+            self.live.cancel_open()
         return fill
