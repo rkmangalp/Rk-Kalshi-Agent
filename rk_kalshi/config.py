@@ -48,6 +48,7 @@ class AppConfig:
     cycle_sleep_s: float = 15.0
     max_signals_per_cycle: int = 8
     live_enabled: bool = False
+    account_environment: str = "prod"
     target_url: str = ""
     target_event_ticker: str = ""
     target_market_ticker: str = ""
@@ -85,6 +86,7 @@ def config_from_mapping(raw: dict[str, Any]) -> AppConfig:
     signal = raw.get("signal") or {}
     paper = raw.get("paper") or {}
     live = raw.get("live") or {}
+    account = raw.get("account") or {}
 
     series = kalshi.get("series_tickers") or list(DEFAULT_SERIES)
     bitcoin_series = kalshi.get("bitcoin_series_tickers") or list(DEFAULT_BITCOIN_SERIES)
@@ -123,4 +125,5 @@ def config_from_mapping(raw: dict[str, Any]) -> AppConfig:
         cycle_sleep_s=float(paper.get("cycle_sleep_s", 15.0)),
         max_signals_per_cycle=int(paper.get("max_signals_per_cycle", 8)),
         live_enabled=bool(live.get("enabled", False)),
+        account_environment=str(account.get("environment") or "prod"),
     )

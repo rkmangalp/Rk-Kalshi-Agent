@@ -89,6 +89,8 @@ class LiveKalshiExecution:
        The legacy ``POST /portfolio/orders`` (yes/no + buy/sell) was removed.
 
     This class always raises. ``config live.enabled`` cannot turn it on.
+    Connecting a Kalshi account for read-only portfolio view is separate
+    and must not call this class.
     """
 
     mode = "live"

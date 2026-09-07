@@ -62,6 +62,14 @@ paper:
   cycle_sleep_s: 50.0
   max_signals_per_cycle: 8
 
+account:
+  # Read-only portfolio view. Credentials come from env / .env /
+  # or the dashboard Connect form (gitignored local store).
+  # demo → https://external-api.demo.kalshi.co/trade-api/v2
+  # prod → https://external-api.kalshi.com/trade-api/v2
+  environment: prod
+
 live:
   # Must stay false. LiveKalshiExecution raises if called.
+  # Connecting an account does NOT enable this.
   enabled: false

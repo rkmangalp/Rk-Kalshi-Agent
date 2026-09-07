@@ -5,11 +5,14 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta http-equiv="Cache-Control" content="no-store">
   <title>Rk Kalshi Paper Desk</title>
-  <link rel="stylesheet" href="/static/app.css?v=contract4">
+  <link rel="stylesheet" href="/static/app.css?v=account1">
 </head>
 <body>
-  <div class="banner" role="status">
-    PAPER MODE ONLY — no live orders
+  <div class="banner paper-banner" role="status">
+    PAPER MODE ONLY — paper desk — no live orders
+  </div>
+  <div class="banner account-banner is-disconnected" id="account-banner" role="status">
+    KALSHI ACCOUNT DISCONNECTED — paper desk only
   </div>
 
   <header class="top">
@@ -18,10 +21,156 @@
       <h1>Paper desk</h1>
     </div>
     <div class="top-meta">
+      <span class="pill lock" id="account-pill">account disconnected</span>
       <span class="pill lock" id="size-pill">can_size_up locked</span>
       <span class="pill ok" id="kill-pill">kill-switch clear</span>
     </div>
   </header>
+
+  <section id="account-panel" class="account-panel" aria-label="Connect Kalshi account">
+    <div class="start-copy">
+      <p class="eyebrow">Kalshi account</p>
+      <h2>Connect to see live trades</h2>
+      <p class="lede">
+        Read-only: API Key ID + RSA private key. Connecting
+        <strong>does not</strong> enable live order placement.
+        Paper desk stays simulated. Keys stay in a local gitignored
+        store or <code>.env</code> — never commit them.
+      </p>
+    </div>
+    <form id="account-form" class="account-form">
+      <label>
+        Environment
+        <select id="account-env">
+          <option value="prod">Production (external-api.kalshi.com)</option>
+          <option value="demo">Demo (external-api.demo.kalshi.co)</option>
+        </select>
+      </label>
+      <label>
+        API Key ID
+        <input id="account-key-id" type="text" spellcheck="false" autocomplete="off" placeholder="a952bcbe-ec3b-4b5b-b8f9-…">
+      </label>
+      <label class="wide">
+        Path to RSA private key
+        <input id="account-key-path" type="text" spellcheck="false" placeholder="C:\Users\Rk\.kalshi\kalshi.key">
+      </label>
+      <label class="wide">
+        Or paste PEM (local store only)
+        <textarea id="account-key-pem" rows="4" spellcheck="false" placeholder="-----BEGIN RSA PRIVATE KEY-----"></textarea>
+      </label>
+      <div class="account-status-row">
+        <span class="conn disconnected" id="account-conn">Disconnected</span>
+        <span class="fine" id="account-hint">Create keys at Kalshi Account &amp; security → API Keys (demo or prod).</span>
+      </div>
+      <label class="inline coming-soon">
+        <input type="checkbox" id="enable-live-trading" disabled>
+        Enable live trading (coming soon)
+      </label>
+      <div class="account-actions">
+        <button type="button" id="btn-connect" class="primary">Connect</button>
+        <button type="button" id="btn-disconnect">Disconnect</button>
+      </div>
+    </form>
+  </section>
+
+  <section class="panel live-trades" id="live-trades-panel" aria-label="Live Kalshi trades">
+    <div class="panel-head">
+      <h2>Live account view</h2>
+      <div class="toolbar">
+        <span class="view-chip paper-chip" id="view-chip">Paper desk</span>
+        <label class="inline">
+          <input type="checkbox" id="auto-account">
+          Auto-refresh
+        </label>
+        <button type="button" id="btn-account-refresh">Refresh</button>
+        <span class="muted" id="account-meta">not connected</span>
+      </div>
+    </div>
+    <p class="fine" id="live-trades-note">
+      This panel is your real Kalshi balance, positions, fills, and orders.
+      It is not the paper fill log below.
+    </p>
+    <section class="summary live-summary" id="account-cards" aria-label="Live account summary">
+      <article class="card">
+        <h2>Balance</h2>
+        <p class="metric" id="live-balance">—</p>
+        <p class="hint">available cash</p>
+      </article>
+      <article class="card">
+        <h2>Portfolio value</h2>
+        <p class="metric" id="live-portfolio">—</p>
+        <p class="hint">Kalshi mark-to-market</p>
+      </article>
+      <article class="card">
+        <h2>Open positions</h2>
+        <p class="metric" id="live-positions">0</p>
+        <p class="hint" id="live-pos-hint">read-only</p>
+      </article>
+      <article class="card">
+        <h2>Recent fills</h2>
+        <p class="metric" id="live-fills">0</p>
+        <p class="hint">matched trades</p>
+      </article>
+    </section>
+    <div class="table-wrap">
+      <h3>Open positions</h3>
+      <table id="live-positions-table">
+        <thead>
+          <tr>
+            <th>Ticker</th>
+            <th>Side</th>
+            <th class="num">Contracts</th>
+            <th class="num">Exposure</th>
+            <th class="num">Realized P&amp;L</th>
+            <th class="num">Fees</th>
+            <th>Updated</th>
+          </tr>
+        </thead>
+        <tbody id="live-positions-body">
+          <tr><td colspan="7" class="empty">Connect to load live positions.</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="table-wrap">
+      <h3>Recent fills</h3>
+      <table id="live-fills-table">
+        <thead>
+          <tr>
+            <th>Time</th>
+            <th>Ticker</th>
+            <th>Book</th>
+            <th>Outcome</th>
+            <th class="num">Count</th>
+            <th class="num">YES $</th>
+            <th class="num">Fee</th>
+            <th>Taker</th>
+          </tr>
+        </thead>
+        <tbody id="live-fills-body">
+          <tr><td colspan="8" class="empty">Connect to load live fills.</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="table-wrap">
+      <h3>Orders</h3>
+      <table id="live-orders-table">
+        <thead>
+          <tr>
+            <th>Status</th>
+            <th>Ticker</th>
+            <th>Book</th>
+            <th class="num">Remain</th>
+            <th class="num">Filled</th>
+            <th class="num">YES $</th>
+            <th>Created</th>
+          </tr>
+        </thead>
+        <tbody id="live-orders-body">
+          <tr><td colspan="7" class="empty">Connect to load live orders.</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
 
   <section id="start-panel" class="start-panel" aria-label="Start paper session">
     <div class="start-copy">
@@ -249,6 +398,6 @@
     <span id="footer-meta">localhost · paper_mode=true · live.enabled cannot be turned on from this UI</span>
   </footer>
 
-  <script src="/static/app.js?v=contract4"></script>
+  <script src="/static/app.js?v=account1"></script>
 </body>
 </html>
