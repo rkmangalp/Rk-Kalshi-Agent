@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta http-equiv="Cache-Control" content="no-store">
   <title>Rk Kalshi Paper Desk</title>
-  <link rel="stylesheet" href="/static/app.css?v=account4">
+  <link rel="stylesheet" href="/static/app.css?v=localenv1">
 </head>
 <body>
   <div class="banner paper-banner" role="status">
@@ -19,6 +19,7 @@
     <div>
       <p class="eyebrow">Rk-Kalshi-Agent</p>
       <h1>Paper desk</h1>
+      <p class="fine" id="signal-note">Avellaneda–Stoikov + order-book imbalance · paper only · not a predictor</p>
     </div>
     <div class="top-meta">
       <span class="pill lock" id="account-pill">account disconnected</span>
@@ -32,17 +33,20 @@
       <p class="eyebrow">Kalshi account</p>
       <h2>Connect to see live trades</h2>
       <p class="lede">
-        Read-only live account view. Connect uses
-        <code>KALSHI_API_KEY_ID</code> and
-        <code>KALSHI_PRIVATE_KEY_PATH</code> from a local gitignored
-        <code>.env</code> — never typed into this page, never committed.
-        Connecting does <strong>not</strong> enable live order placement.
+        Read-only. <strong>Connect</strong> loads
+        <code>KALSHI_API_KEY_ID</code>,
+        <code>KALSHI_PRIVATE_KEY_PATH</code>, and
+        <code>KALSHI_ENVIRONMENT</code> from a local
+        <code>.env</code> or the process environment — never from this UI.
+        Connecting <strong>does not</strong> enable live order placement.
+        OpenAI / ChatGPT modes also read <code>OPENAI_API_KEY</code> from
+        <code>.env</code> only.
       </p>
     </div>
     <form id="account-form" class="account-form">
       <div class="account-status-row">
         <span class="conn disconnected" id="account-conn">Disconnected</span>
-        <span class="fine" id="account-hint">Copy .env.example to .env, then Connect. Demo vs prod is KALSHI_ENVIRONMENT.</span>
+        <span class="fine" id="account-hint">Set KALSHI_API_KEY_ID and KALSHI_PRIVATE_KEY_PATH in a local .env (never paste keys in the UI).</span>
       </div>
       <label class="inline coming-soon">
         <input type="checkbox" id="enable-live-trading" disabled>
@@ -159,14 +163,18 @@
       <p class="eyebrow">Paper session</p>
       <h2>Start paper trading</h2>
       <p class="lede">
-        Set a paper bankroll, then Start. Paper-trades Kalshi
+        Paper signal: <strong>Avellaneda–Stoikov reservation price</strong>
+        plus <strong>order-book imbalance</strong>, after Kalshi fees and
+        spread. Set a paper bankroll, then Start. Paper-trades Kalshi
         <strong>Bitcoin buy and sell</strong> (YES contracts) and optional
         live tennis. Optionally lock to <strong>any pasted Kalshi
         market or event</strong>. This is simulated cash — the UI cannot
-        place live Kalshi or exchange orders. <code>can_size_up</code>
-        stays locked. Stop ends polling. <strong>Clear</strong> wipes
-        the local paper session (fills, P&amp;L, log, selected contract) —
-        not a live Kalshi account.
+        place live Kalshi or exchange orders. <strong>Not financial advice</strong>
+        and not a match or price predictor. There is
+        <strong>no guaranteed profitable model</strong>.
+        <code>can_size_up</code> stays locked. Stop ends polling.
+        <strong>Clear</strong> wipes the local paper session (fills, P&amp;L,
+        log, selected contract) — not a live Kalshi account.
       </p>
     </div>
     <form id="start-form" class="start-form">
@@ -198,6 +206,15 @@
         <input type="checkbox" id="live-matches-only" checked>
         Live tennis matches only (in-play)
       </label>
+      <label>
+        Paper signal
+        <select id="signal-mode">
+          <option value="as_obi" selected>Avellaneda–Stoikov + OBI (local)</option>
+          <option value="hybrid">Hybrid: AS filter + ChatGPT confirm</option>
+          <option value="llm">ChatGPT research (slow)</option>
+        </select>
+      </label>
+      <p class="fine" id="signal-mode-hint">ChatGPT modes read OPENAI_API_KEY from a local .env only — never paste keys here. LLM research is not a guaranteed edge.</p>
       <div class="contract-box" id="contract-box">
         <p class="eyebrow">Contract / match</p>
         <h3>Choose a contract to paper-trade</h3>
@@ -337,11 +354,14 @@
             <th class="num">Mid</th>
             <th class="num">Last</th>
             <th class="num">Spread ¢</th>
+            <th class="num">OBI</th>
+            <th class="num">Bid sz</th>
+            <th class="num">Ask sz</th>
             <th class="num">Volume</th>
           </tr>
         </thead>
         <tbody id="markets-body">
-          <tr><td colspan="10" class="empty">Loading markets…</td></tr>
+          <tr><td colspan="13" class="empty">Loading markets…</td></tr>
         </tbody>
       </table>
     </div>
@@ -380,6 +400,6 @@
     <span id="footer-meta">localhost · paper_mode=true · live.enabled cannot be turned on from this UI</span>
   </footer>
 
-  <script src="/static/app.js?v=account3"></script>
+  <script src="/static/app.js?v=localenv1"></script>
 </body>
 </html>

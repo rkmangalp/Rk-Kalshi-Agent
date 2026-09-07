@@ -153,6 +153,15 @@ def _snapshots_from_event(event: dict[str, Any], series_ticker: str) -> list[Mar
                 occurrence_ts=_parse_ts(
                     market.get("occurrence_datetime") or market.get("expected_expiration_time")
                 ),
+                yes_bid_size=parse_count(
+                    market.get("yes_bid_size_fp", market.get("yes_bid_size"))
+                ),
+                yes_ask_size=parse_count(
+                    market.get("yes_ask_size_fp", market.get("yes_ask_size"))
+                ),
+                close_ts=_parse_ts(
+                    market.get("close_time") or market.get("expected_expiration_time")
+                ),
             )
         )
     return [s for s in out if s.ticker]

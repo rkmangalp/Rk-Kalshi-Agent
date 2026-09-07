@@ -43,6 +43,22 @@ signal:
   edge_threshold_cents: 3.0
   fee_coefficient: 0.07
   fee_multiplier: 1.0
+  # Avellaneda–Stoikov reservation: r = mid - q * gamma * sigma^2 * T_frac.
+  # There is no guaranteed profitable model; these knobs only change skew.
+  gamma: 0.25
+  sigma_floor: 0.04
+  sigma_window: 32
+  t_frac_horizon_seconds: 14400
+  # Order-book imbalance weight (alias: obi_weight). tilt = kappa * OBI * spread.
+  kappa: 1.5
+  obi_tilt_cents: 2.0
+  # Optional last-print / EMA fair when inventory and OBI are both idle.
+  use_ema_fallback: false
+  # as_obi (default) | hybrid (AS filters, ChatGPT confirms) | llm
+  mode: as_obi
+  llm_model: gpt-4o-mini
+  llm_min_interval_s: 20
+  llm_max_markets_per_call: 6
   ema_alpha: 0.30
   last_trade_weight: 0.50
   # Ignore last prints this far from mid — usually a stale tape, not edge.

@@ -36,6 +36,7 @@
     liveMatchesOnly: $("live-matches-only"),
     tradeBitcoin: $("trade-bitcoin"),
     tradeTennis: $("trade-tennis"),
+    signalMode: $("signal-mode"),
     filterBitcoinMarkets: $("filter-bitcoin-markets"),
     filterLiveMarkets: $("filter-live-markets"),
     log: $("log"),
@@ -166,6 +167,7 @@
     if (els.liveMatchesOnly) els.liveMatchesOnly.disabled = !enabled;
     if (els.tradeBitcoin) els.tradeBitcoin.disabled = !enabled;
     if (els.tradeTennis) els.tradeTennis.disabled = !enabled;
+    if (els.signalMode) els.signalMode.disabled = !enabled;
     if (els.contractSelect) els.contractSelect.disabled = !enabled;
     if (els.contractUrl) els.contractUrl.disabled = !enabled;
     if (els.btnUseContract) els.btnUseContract.disabled = !enabled;
@@ -212,12 +214,12 @@
       `${btcCount} btc · ${liveCount} live tennis / ${payload.count} open · ${payload.series.join(", ")} · ${fmt(payload.latency_ms, 1)} ms`;
     if (!all.length) {
       els.marketsBody.innerHTML =
-        '<tr><td colspan="10" class="empty">No open markets (empty series filter).</td></tr>';
+        '<tr><td colspan="13" class="empty">No open markets (empty series filter).</td></tr>';
       return;
     }
     if (!rows.length) {
       els.marketsBody.innerHTML =
-        '<tr><td colspan="10" class="empty">No rows for the current Bitcoin / live-tennis filters.</td></tr>';
+        '<tr><td colspan="13" class="empty">No rows for the current Bitcoin / live-tennis filters.</td></tr>';
       return;
     }
     els.marketsBody.innerHTML = rows.map((m) => `
@@ -231,6 +233,9 @@
         <td class="num">${m.yes_mid == null ? "—" : fmt(m.yes_mid, 3)}</td>
         <td class="num">${fmt(m.last_price, 3)}</td>
         <td class="num">${m.spread_cents == null ? "—" : fmt(m.spread_cents, 1)}</td>
+        <td class="num">${m.order_book_imbalance == null ? "—" : fmt(m.order_book_imbalance, 2)}</td>
+        <td class="num">${fmt(m.yes_bid_size, 0)}</td>
+        <td class="num">${fmt(m.yes_ask_size, 0)}</td>
         <td class="num">${fmt(m.volume, 1)}</td>
       </tr>
     `).join("");
@@ -291,8 +296,13 @@
 
     const series = (status.series_tickers || []).join(", ");
     const account = status.account || {};
+    const algo = status.signal_algorithm || "Avellaneda–Stoikov + OBI";
     els.footer.textContent =
-      `localhost · paper_mode=true · live.enabled=false · account=${account.status || "disconnected"} · btc=${status.trade_bitcoin} tennis=${status.trade_tennis} · live_matches_only=${status.live_matches_only} · series ${series} · edge ${status.edge_threshold_cents}¢`;
+      `localhost · paper_mode=true · live.enabled=false · ${algo} · account=${account.status || "disconnected"} · btc=${status.trade_bitcoin} tennis=${status.trade_tennis} · live_matches_only=${status.live_matches_only} · series ${series} · edge ${status.edge_threshold_cents}¢`;
+    const signalNote = $("signal-note");
+    if (signalNote && status.signal_algorithm) {
+      signalNote.textContent = `${status.signal_algorithm} · paper only · not a predictor`;
+    }
     renderAccountStatus(account, status.account_environment_default);
     if (!els.startForm.dataset.seeded) {
       if (status.starting_cash != null) els.startingCash.value = status.starting_cash;
@@ -310,6 +320,9 @@
       }
       if (els.tradeTennis && status.trade_tennis != null) {
         els.tradeTennis.checked = Boolean(status.trade_tennis);
+      }
+      if (els.signalMode && status.signal_mode) {
+        els.signalMode.value = status.signal_mode;
       }
       els.startForm.dataset.seeded = "1";
       els.sleep.dataset.seeded = "1";
@@ -449,10 +462,14 @@
     }
     if (els.accountHint) {
       const suffix = account.api_key_id_suffix ? ` key ${account.api_key_id_suffix}` : "";
-      els.accountHint.textContent = account.message
-        || (status === "connected"
-          ? `Read-only${suffix}. Live trading stays off.`
-          : "Copy .env.example to .env (KALSHI_API_KEY_ID + KALSHI_PRIVATE_KEY_PATH), then Connect.");
+      if (account.message) {
+        els.accountHint.textContent = account.message;
+      } else if (status === "connected") {
+        els.accountHint.textContent = `Read-only${suffix}. Live trading stays off.`;
+      } else {
+        els.accountHint.textContent =
+          "Set KALSHI_API_KEY_ID and KALSHI_PRIVATE_KEY_PATH in a local .env (never paste keys in the UI).";
+      }
     }
     if (els.enableLiveTrading) {
       els.enableLiveTrading.checked = false;
@@ -681,6 +698,7 @@
           live_matches_only: Boolean(els.liveMatchesOnly && els.liveMatchesOnly.checked),
           trade_bitcoin: Boolean(!els.tradeBitcoin || els.tradeBitcoin.checked),
           trade_tennis: Boolean(!els.tradeTennis || els.tradeTennis.checked),
+          signal_mode: (els.signalMode && els.signalMode.value) || "as_obi",
           ...contractStartFields(),
           mode: "paper",
         }),

@@ -2,9 +2,14 @@
 
 Paper-trading agent for Kalshi tennis and Bitcoin markets. Order placement is
 **paper-only**: it reads public Kalshi REST market data, computes a transparent
-edge, and simulates fills. You can **connect** (read-only) via local `.env` keys to view live
-balance, positions, fills, and orders. Connecting does **not** send
+edge, and simulates fills. You can **connect** a Kalshi API key to view your
+live balance, positions, fills, and orders. Connecting does **not** send
 live orders.
+
+The paper signal is **Avellaneda–Stoikov reservation price + order-book
+imbalance**, after Kalshi fees and spread. It is **not financial advice**,
+**not** a match-winner or Bitcoin price model, and there is **no guaranteed
+profitable edge**. Treat paper P&L as an audit of costs and risk caps.
 
 Kalshi tennis contracts are binary YES/NO event contracts (typically “player X
 wins the match”). Bankroll target is about **$100**. Job-hunt / JobPilot code
@@ -14,10 +19,13 @@ does not belong here.
 
 Turning $100 into $100/day on tennis mids is not a realistic plan. This bot
 polls the public REST book. That cannot beat informed, colocated, or
-WebSocket-speed flow. Most scans should produce **no** trade. The signal is a
-microstructure heuristic (last print / EMA vs mid, after spread and fee) — not
-a match-winner model. Treat paper P&L as an audit of costs and risk, not an
-edge proof.
+WebSocket-speed flow. Most scans should produce **no** trade.
+
+Research on prediction-market microstructure (implementable on REST) supports
+inventory-aware quotes (Avellaneda–Stoikov), short-horizon order-book
+imbalance, and always subtracting fees plus spread. That is a **heuristic**,
+not a proven alpha. There is no guaranteed profitable model for Kalshi-style
+binary contracts.
 
 `can_size_up` stays **locked off** (`allow_size_up: false`,
 `min_fills_before_size_up: 200`). Do not size up until paper P&L is positive on
@@ -26,19 +34,23 @@ a large sample, and even then only after a deliberate config/code change.
 ## Architecture
 
 ```
-Kalshi public REST  →  TennisSignalEngine  →  RiskManager  →  PaperExecution
-     (no auth)            (edges+thesis)     (caps/kill)     (fill @ YES mid)
+Kalshi public REST  →  SignalEngine  →  RiskManager  →  PaperExecution
+     (no auth)         (AS + OBI)      (caps/kill)     (fill @ YES mid)
                                                                   ↓
                                                          CSV + JSONL journal
 ```
 
-1. **Signal** (`rk_kalshi/signal.py`) is separate from execution. It ingests
-   live tennis markets, estimates fair YES from last trade + EMA, subtracts
-   half-spread and a Kalshi-style quadratic fee
-   (`0.07 × P × (1−P)`, rounded up to the next cent), and emits buy/sell only
-   when net edge ≥ `edge_threshold_cents` (default 3¢). Wide or stale mids are
-   skipped. A last print more than `max_last_dislocation_cents` (default 8¢)
-   from mid is treated as a stale tape, not fair value.
+1. **Signal** (`rk_kalshi/signal.py`) is separate from execution. For each
+   ticker it tracks a rolling mid history (σ in probability space) and paper
+   inventory `q` (signed YES contracts). The Avellaneda–Stoikov reservation is
+   `r = mid − q · γ · σ² · T_frac` (`T_frac` from time-to-close, else 1).
+   Order-book imbalance `OBI = (bid_size − ask_size) / (bid_size + ask_size)`
+   (Kalshi `yes_bid_size_fp` / `yes_ask_size_fp`; 0 if missing) tilts fair:
+   `fair = r + κ · OBI · spread`. Half-spread and a Kalshi-style quadratic fee
+   (`0.07 × P × (1−P)`, rounded up to the next cent) are subtracted; buy/sell
+   only when net edge ≥ `edge_threshold_cents` (default 3¢). Wide or stale mids
+   are skipped. Optional EMA / last-print fair (`use_ema_fallback`) is used
+   only when inventory and OBI are idle. **Not a match pick.**
 2. **Paper execution** (`rk_kalshi/execution.py`) fills at the live YES mid.
    `LiveKalshiExecution` always raises; live trading is disabled.
 3. **Risk** (`rk_kalshi/risk.py`): max **$5** notional per ticker (default),
@@ -87,6 +99,8 @@ The dashboard is a local FastAPI app: a **Start** page sets paper bankroll
 Paste **any Kalshi market or event URL** to lock paper trading to that
 event’s contracts — not a whitelist of ATP/WTA/ITF/Bitcoin series.
 Challenger, Bitcoin 15-minute books, and other `KX…` events all work.
+The paper signal is named on the desk: **Avellaneda–Stoikov + order-book
+imbalance**. It is not a match predictor and not financial advice.
 
 Example Kalshi URLs:
 
@@ -143,13 +157,10 @@ unchanged.
 ## Connect Kalshi (read-only trades)
 
 The dashboard **Connect** button and `python -m rk_kalshi account` load your
-real Kalshi balance, open positions, recent fills, and orders. This is a
-**live account view**, separate from the paper desk. Connecting does
+real Kalshi balance, open positions, recent fills, and orders from **local
+credentials only**. There is no API-key form in the UI. Connecting does
 **not** turn on live order placement (`live.enabled` stays false; the
 “Enable live trading” checkbox is a disabled coming-soon stub).
-
-Keys are **not** entered in the UI. Connect reads only a local `.env`
-file (gitignored).
 
 ### Create API keys (demo + production)
 
@@ -164,10 +175,10 @@ Kalshi demo and production credentials are **not** interchangeable.
    - **API Key ID** (UUID shown on screen)
    - **Private key** (downloaded `.key` PEM — Kalshi cannot show it again)
 
-### Windows: `.env` only
+### Windows: local `.env` only
 
-Never commit `.key`, `.pem`, or `.env`. Do not paste keys into the
-dashboard.
+Prefer a file path. Never commit `.key`, `.pem`, `.env`, or
+`data/kalshi_account.json`. Never paste keys into the dashboard.
 
 Command Prompt:
 
@@ -180,7 +191,7 @@ copy .env.example .env
 notepad .env
 ```
 
-`.env` (repo root):
+In `.env` (edit locally; the UI will not accept keys):
 
 ```
 KALSHI_API_KEY_ID=a952bcbe-ec3b-4b5b-b8f9-11dae589608c
@@ -196,15 +207,30 @@ Use `KALSHI_ENVIRONMENT=demo` with a demo key. Recommended REST roots:
 | Demo | `https://external-api.demo.kalshi.co/trade-api/v2` (`demo-api.kalshi.co` still works) |
 
 Then `python -m rk_kalshi dashboard` → **Connect**. Status shows
-Connected / Disconnected / Error. **Refresh** (optional auto-refresh)
-reloads the live trades panel. Public market reads still work without
-keys.
+Connected / Disconnected / Error. If keys are missing, the UI says to set
+`.env` locally. **Refresh** (optional auto-refresh) reloads the live trades
+panel. Public market reads still work without keys. **Disconnect** drops the
+in-memory session (it does not delete your `.env`).
 
 ```bat
 python -m rk_kalshi account
 ```
 
 prints the same read-only snapshot in the terminal.
+
+### Optional ChatGPT paper research
+
+Set `OPENAI_API_KEY` in the same local `.env`. There is **no** OpenAI key
+field on the dashboard. In `config.yaml` (or the Start panel):
+
+- `signal.mode: as_obi` — local Avellaneda–Stoikov + order-book imbalance (default)
+- `signal.mode: hybrid` — AS+OBI proposes candidates; ChatGPT confirms or skips
+- `signal.mode: llm` — ChatGPT proposes paper buy/sell (still fee- and risk-gated)
+
+Default model is `gpt-4o-mini` (`signal.llm_model`). Calls are rate-limited
+(`llm_min_interval_s`). LLM research is **slow** versus the book, costs API
+tokens, and is **not** a guaranteed edge or a match predictor. Live orders
+stay disabled.
 
 ## Config
 
@@ -219,9 +245,15 @@ Defaults live in `config.yaml`:
 | `sizing.allow_size_up` | `false` | **Locked** |
 | `sizing.min_fills_before_size_up` | `200` | Unlock floor (still needs +P&L) |
 | `signal.edge_threshold_cents` | `3.0` | Net edge after spread + fee |
+| `signal.gamma` | `0.25` | Avellaneda–Stoikov risk aversion (inventory skew) |
+| `signal.kappa` | `1.5` | Order-book imbalance weight (`obi_weight` alias) |
+| `signal.sigma_floor` | `0.04` | Minimum mid volatility in probability space |
+| `signal.use_ema_fallback` | `false` | Optional last-print / EMA fair when OBI and inventory are idle |
+| `signal.mode` | `as_obi` | `as_obi` (local), `hybrid`, or `llm` (ChatGPT; key from `.env`) |
+| `signal.llm_model` | `gpt-4o-mini` | OpenAI model for llm/hybrid paper research |
 | `kalshi.series_tickers` | `KXATPMATCH`, `KXWTAMATCH`, `KXITFWMATCH` | Match series |
 | `live.enabled` | `false` | Cannot enable the live stub |
-| `account.environment` | `prod` | Unused by Connect — demo/prod comes from `.env` `KALSHI_ENVIRONMENT` |
+| `account.environment` | `prod` | Default demo/prod if `.env` omits `KALSHI_ENVIRONMENT` |
 
 Public market-data base URL: `https://external-api.kalshi.com/trade-api/v2`.
 Those reads do not need API keys. Authenticated portfolio GETs use RSA-PSS

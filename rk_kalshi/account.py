@@ -19,11 +19,6 @@ import httpx
 from cryptography.hazmat.primitives import serialization
 
 from rk_kalshi.auth import (
-    ENV_BASE_URL,
-    ENV_ENVIRONMENT,
-    ENV_KEY_ID,
-    ENV_KEY_PATH,
-    MISSING_ENV_MESSAGE,
     AccountAuthError,
     KalshiCredentials,
     auth_headers,
@@ -40,6 +35,10 @@ STORE_FILENAME = "kalshi_account.json"
 KEY_FILENAME = "kalshi_private.key"
 DEFAULT_LIMIT = 100
 LIVE_TRADING_MESSAGE = "Live trading is coming soon — connect is read-only and does not place orders."
+MISSING_ENV_MESSAGE = (
+    "Kalshi keys are missing. Set KALSHI_API_KEY_ID and KALSHI_PRIVATE_KEY_PATH "
+    "in a local .env (never paste keys in the UI)."
+)
 
 
 class AccountApiError(RuntimeError):
@@ -360,31 +359,60 @@ class AccountService:
         with self._lock:
             return self._snapshot.as_dict()
 
-    def connect_from_env(self, environ: dict[str, str] | None = None) -> dict[str, Any]:
-        """Connect using KALSHI_API_KEY_ID + KALSHI_PRIVATE_KEY_PATH from .env."""
-        if environ is None:
-            load_dotenv_file(override=True)
-            environ = dict(os.environ)
-        key_id = (environ.get(ENV_KEY_ID) or "").strip()
-        path = (environ.get(ENV_KEY_PATH) or "").strip()
-        if not key_id or not path:
-            with self._lock:
-                self._mark_error(MISSING_ENV_MESSAGE)
-            raise AccountAuthError(MISSING_ENV_MESSAGE)
+    def connect(
+        self,
+        api_key_id: str = "",
+        *,
+        environment: str = "prod",
+        private_key_path: str | None = None,
+        private_key_pem: str | None = None,
+    ) -> dict[str, Any]:
+        """Programmatic connect (tests/CLI). Dashboard uses connect_from_local()."""
+        persist_pem = bool((private_key_pem or "").strip()) and not (private_key_path or "").strip()
         try:
             creds = credentials_from_parts(
-                key_id,
-                environment=environ.get(ENV_ENVIRONMENT) or "prod",
-                private_key_path=path,
-                base_url=(environ.get(ENV_BASE_URL) or "").strip() or None,
+                api_key_id,
+                environment=environment,
+                private_key_path=private_key_path,
+                private_key_pem=private_key_pem,
             )
         except AccountAuthError as exc:
             with self._lock:
-                self._mark_error(str(exc), api_key_id_suffix=mask_key_id(key_id))
+                self._mark_error(str(exc), environment=environment, api_key_id_suffix=mask_key_id(api_key_id))
             raise
-        return self._activate(creds)
+        return self._activate(creds, persist_store=True, persist_pem=persist_pem)
 
-    def _activate(self, creds: KalshiCredentials) -> dict[str, Any]:
+    def connect_from_local(self) -> dict[str, Any]:
+        """Load keys from .env / process env / gitignored store. Never from the UI."""
+        load_dotenv_file()
+        creds = None
+        try:
+            creds = credentials_from_env()
+        except AccountAuthError as exc:
+            with self._lock:
+                self._mark_error(str(exc))
+            raise
+        if creds is None:
+            try:
+                creds = self.store.credentials()
+            except AccountAuthError as exc:
+                with self._lock:
+                    self._mark_error(str(exc))
+                raise
+        if creds is None:
+            with self._lock:
+                self._mark_error(MISSING_ENV_MESSAGE)
+            raise AccountAuthError(MISSING_ENV_MESSAGE)
+        persist_store = bool(creds.key_path)
+        return self._activate(creds, persist_store=persist_store, persist_pem=False)
+
+    def _activate(
+        self,
+        creds: KalshiCredentials,
+        *,
+        persist_store: bool,
+        persist_pem: bool,
+    ) -> dict[str, Any]:
         client = KalshiSignedClient(creds, timeout_s=self.timeout_s)
         try:
             payload, latency_ms = client.get_json("/portfolio/balance")
@@ -398,13 +426,24 @@ class AccountService:
                     api_key_id_suffix=mask_key_id(creds.api_key_id),
                 )
             raise
-        self.store.clear()
+        if persist_store:
+            self.store.save(creds, persist_pem=persist_pem)
+            if persist_pem:
+                creds = credentials_from_parts(
+                    creds.api_key_id,
+                    environment=creds.environment,
+                    private_key_path=str(self.store.key_path),
+                    base_url=creds.base_url,
+                )
+                replacement = KalshiSignedClient(creds, timeout_s=self.timeout_s)
+                client.close()
+                client = replacement
         with self._lock:
             if self._owns_client and self._client is not None:
                 self._client.close()
             self._client = client
             self._owns_client = True
-            self._mark_ok(creds, latency_ms, "Connected — read-only portfolio view (.env)")
+            self._mark_ok(creds, latency_ms, "Connected — read-only portfolio view")
         return self.snapshot()
 
     def disconnect(self) -> dict[str, Any]:
@@ -489,21 +528,32 @@ class AccountService:
         }
 
     def _hydrate(self) -> None:
+        creds = None
         try:
-            creds = credentials_from_env()
+            creds = self.store.credentials()
         except AccountAuthError as exc:
             self._snapshot = AccountSnapshot(status="error", message=str(exc), last_error=str(exc))
             return
+        source = "local store"
         if creds is None:
-            self._snapshot = AccountSnapshot(message=MISSING_ENV_MESSAGE)
+            try:
+                creds = credentials_from_env()
+                source = "environment"
+            except AccountAuthError as exc:
+                self._snapshot = AccountSnapshot(status="error", message=str(exc), last_error=str(exc))
+                return
+        if creds is None:
+            self._snapshot = AccountSnapshot()
             return
+        self._client = KalshiSignedClient(creds, timeout_s=self.timeout_s)
+        self._owns_client = True
         self._snapshot = AccountSnapshot(
             status="disconnected",
             environment=creds.environment,
             base_url=creds.base_url,
             api_key_id_suffix=mask_key_id(creds.api_key_id),
             key_path=creds.key_path,
-            message="Found .env keys — click Connect (read-only; live orders stay off)",
+            message=f"Credentials loaded from {source} — refresh Live trades to verify",
         )
 
     def _ensure_client(self) -> KalshiSignedClient:
@@ -512,7 +562,8 @@ class AccountService:
                 return self._client
         raise AccountNotConnectedError(
             "Kalshi account is not connected. Click Connect after setting "
-            "KALSHI_API_KEY_ID and KALSHI_PRIVATE_KEY_PATH in .env."
+            "KALSHI_API_KEY_ID and KALSHI_PRIVATE_KEY_PATH in a local .env "
+            "(never paste keys in the UI)."
         )
 
     def _mark_ok(self, creds: KalshiCredentials, latency_ms: float, message: str) -> None:

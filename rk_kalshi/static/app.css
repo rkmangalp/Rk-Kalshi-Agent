@@ -89,6 +89,11 @@ h1 {
   font-weight: 650;
 }
 
+#signal-note {
+  margin: 0.35rem 0 0;
+  max-width: 42rem;
+}
+
 .top-meta { display: flex; gap: 0.5rem; flex-wrap: wrap; }
 
 .pill {

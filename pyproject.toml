@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "rk-kalshi-agent"
 version = "0.1.0"
-description = "Paper-trading agent for Kalshi tennis prediction markets"
+description = "Paper-trading agent for Kalshi prediction markets (Avellaneda–Stoikov + OBI)"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
