@@ -30,6 +30,8 @@ class LiveKalshiTennisTests(unittest.TestCase):
         self.assertIsNotNone(sample.occurrence_ts)
         self.assertGreaterEqual(sample.yes_bid, 0.0)
         self.assertGreaterEqual(sample.yes_ask, 0.0)
+        self.assertGreaterEqual(sample.yes_bid_size, 0.0)
+        self.assertGreaterEqual(sample.yes_ask_size, 0.0)
 
 
 if __name__ == "__main__":

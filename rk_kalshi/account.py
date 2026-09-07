@@ -35,6 +35,10 @@ STORE_FILENAME = "kalshi_account.json"
 KEY_FILENAME = "kalshi_private.key"
 DEFAULT_LIMIT = 100
 LIVE_TRADING_MESSAGE = "Live trading is coming soon — connect is read-only and does not place orders."
+MISSING_ENV_MESSAGE = (
+    "Kalshi keys are missing. Set KALSHI_API_KEY_ID and KALSHI_PRIVATE_KEY_PATH "
+    "in a local .env (never paste keys in the UI)."
+)
 
 
 class AccountApiError(RuntimeError):
@@ -357,12 +361,13 @@ class AccountService:
 
     def connect(
         self,
-        api_key_id: str,
+        api_key_id: str = "",
         *,
         environment: str = "prod",
         private_key_path: str | None = None,
         private_key_pem: str | None = None,
     ) -> dict[str, Any]:
+        """Programmatic connect (tests/CLI). Dashboard uses connect_from_local()."""
         persist_pem = bool((private_key_pem or "").strip()) and not (private_key_path or "").strip()
         try:
             creds = credentials_from_parts(
@@ -375,6 +380,39 @@ class AccountService:
             with self._lock:
                 self._mark_error(str(exc), environment=environment, api_key_id_suffix=mask_key_id(api_key_id))
             raise
+        return self._activate(creds, persist_store=True, persist_pem=persist_pem)
+
+    def connect_from_local(self) -> dict[str, Any]:
+        """Load keys from .env / process env / gitignored store. Never from the UI."""
+        load_dotenv_file()
+        creds = None
+        try:
+            creds = credentials_from_env()
+        except AccountAuthError as exc:
+            with self._lock:
+                self._mark_error(str(exc))
+            raise
+        if creds is None:
+            try:
+                creds = self.store.credentials()
+            except AccountAuthError as exc:
+                with self._lock:
+                    self._mark_error(str(exc))
+                raise
+        if creds is None:
+            with self._lock:
+                self._mark_error(MISSING_ENV_MESSAGE)
+            raise AccountAuthError(MISSING_ENV_MESSAGE)
+        persist_store = bool(creds.key_path)
+        return self._activate(creds, persist_store=persist_store, persist_pem=False)
+
+    def _activate(
+        self,
+        creds: KalshiCredentials,
+        *,
+        persist_store: bool,
+        persist_pem: bool,
+    ) -> dict[str, Any]:
         client = KalshiSignedClient(creds, timeout_s=self.timeout_s)
         try:
             payload, latency_ms = client.get_json("/portfolio/balance")
@@ -382,19 +420,24 @@ class AccountService:
         except Exception as exc:
             client.close()
             with self._lock:
-                self._mark_error(str(exc), environment=creds.environment, api_key_id_suffix=mask_key_id(creds.api_key_id))
+                self._mark_error(
+                    str(exc),
+                    environment=creds.environment,
+                    api_key_id_suffix=mask_key_id(creds.api_key_id),
+                )
             raise
-        self.store.save(creds, persist_pem=persist_pem)
-        if persist_pem:
-            creds = credentials_from_parts(
-                creds.api_key_id,
-                environment=creds.environment,
-                private_key_path=str(self.store.key_path),
-                base_url=creds.base_url,
-            )
-            replacement = KalshiSignedClient(creds, timeout_s=self.timeout_s)
-            client.close()
-            client = replacement
+        if persist_store:
+            self.store.save(creds, persist_pem=persist_pem)
+            if persist_pem:
+                creds = credentials_from_parts(
+                    creds.api_key_id,
+                    environment=creds.environment,
+                    private_key_path=str(self.store.key_path),
+                    base_url=creds.base_url,
+                )
+                replacement = KalshiSignedClient(creds, timeout_s=self.timeout_s)
+                client.close()
+                client = replacement
         with self._lock:
             if self._owns_client and self._client is not None:
                 self._client.close()
@@ -518,8 +561,9 @@ class AccountService:
             if self._client is not None:
                 return self._client
         raise AccountNotConnectedError(
-            "Kalshi account is not connected. Use the dashboard Connect form or "
-            "set KALSHI_API_KEY_ID and KALSHI_PRIVATE_KEY_PATH."
+            "Kalshi account is not connected. Click Connect after setting "
+            "KALSHI_API_KEY_ID and KALSHI_PRIVATE_KEY_PATH in a local .env "
+            "(never paste keys in the UI)."
         )
 
     def _mark_ok(self, creds: KalshiCredentials, latency_ms: float, message: str) -> None:

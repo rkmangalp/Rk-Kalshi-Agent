@@ -40,6 +40,8 @@ from rk_kalshi.models import MarketSnapshot, select_bitcoin_tradeable
 from rk_kalshi.risk import RiskManager
 from rk_kalshi.runner import PaperRunner
 from rk_kalshi.schema import FILL_FIELDS
+from rk_kalshi.signal import SIGNAL_DISCLAIMER, algorithm_label
+from rk_kalshi.llm import openai_configured
 from rk_kalshi.state import load_state, local_now_iso, new_state, save_state
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
@@ -91,6 +93,7 @@ class StartRequest(BaseModel):
     live_matches_only: bool = True
     trade_bitcoin: bool = True
     trade_tennis: bool = True
+    signal_mode: str | None = None
     target_url: str | None = None
     target_event_ticker: str | None = None
     target_market_ticker: str | None = None
@@ -104,19 +107,29 @@ class StartRequest(BaseModel):
 
 
 class ConnectRequest(BaseModel):
-    environment: str = "prod"
-    api_key_id: str = ""
-    private_key_path: str | None = None
-    private_key_pem: str | None = None
     enable_live_trading: bool | None = None
     live: bool | None = None
     mode: str | None = None
+    api_key_id: str | None = None
+    private_key_path: str | None = None
+    private_key_pem: str | None = None
+    openai_api_key: str | None = None
+    environment: str | None = None
 
     @model_validator(mode="after")
-    def reject_live(self) -> "ConnectRequest":
+    def reject_live_and_pasted_secrets(self) -> "ConnectRequest":
         _reject_live(self.live, self.mode)
         if self.enable_live_trading:
             raise ValueError(LIVE_TRADING_MESSAGE)
+        pasted = any(
+            str(value or "").strip()
+            for value in (self.api_key_id, self.private_key_path, self.private_key_pem, self.openai_api_key)
+        )
+        if pasted:
+            raise ValueError(
+                "Do not paste API keys in the UI. Set KALSHI_API_KEY_ID, "
+                "KALSHI_PRIVATE_KEY_PATH, and OPENAI_API_KEY in a local .env."
+            )
         return self
 
 
@@ -373,6 +386,8 @@ class DashboardService:
         runner.cfg = cfg
         if getattr(runner, "signal", None) is not None:
             runner.signal.cfg = cfg
+        if getattr(runner, "llm", None) is not None:
+            runner.llm.cfg = cfg
         if getattr(runner, "risk", None) is not None:
             runner.risk.cfg = cfg
         if getattr(runner, "paper", None) is not None:
@@ -387,6 +402,7 @@ class DashboardService:
         live_matches_only: bool = True,
         trade_bitcoin: bool = True,
         trade_tennis: bool = True,
+        signal_mode: str | None = None,
         target_url: str | None = None,
         target_event_ticker: str | None = None,
         target_market_ticker: str | None = None,
@@ -402,6 +418,7 @@ class DashboardService:
             live_matches_only=bool(live_matches_only),
             trade_bitcoin=bool(trade_bitcoin),
             trade_tennis=bool(trade_tennis),
+            signal_mode=self.cfg.signal_mode if signal_mode is None else str(signal_mode),
             target_url=self.cfg.target_url if target_url is None else target_url,
             target_event_ticker=(
                 self.cfg.target_event_ticker if target_event_ticker is None else target_event_ticker
@@ -426,6 +443,7 @@ class DashboardService:
             "live_matches_only": cfg.live_matches_only,
             "trade_bitcoin": cfg.trade_bitcoin,
             "trade_tennis": cfg.trade_tennis,
+            "signal_mode": cfg.signal_mode,
             "target": self.target_payload(cfg),
             "can_size_up": False,
             "allow_size_up": cfg.allow_size_up,
@@ -566,6 +584,7 @@ def _cfg_from_session(cfg: AppConfig) -> AppConfig:
         live_matches_only=bool(raw.get("live_matches_only", cfg.live_matches_only)),
         trade_bitcoin=bool(raw.get("trade_bitcoin", cfg.trade_bitcoin)),
         trade_tennis=bool(raw.get("trade_tennis", cfg.trade_tennis)),
+        signal_mode=str(raw.get("signal_mode") or cfg.signal_mode),
         target_url=str(raw.get("target_url") or cfg.target_url),
         target_event_ticker=str(raw.get("target_event_ticker") or cfg.target_event_ticker),
         target_market_ticker=str(raw.get("target_market_ticker") or cfg.target_market_ticker),
@@ -584,6 +603,7 @@ def _persist_session(cfg: AppConfig, config_path: Path | None) -> dict[str, bool
         "live_matches_only": cfg.live_matches_only,
         "trade_bitcoin": cfg.trade_bitcoin,
         "trade_tennis": cfg.trade_tennis,
+        "signal_mode": cfg.signal_mode,
         "target_url": cfg.target_url,
         "target_event_ticker": cfg.target_event_ticker,
         "target_market_ticker": cfg.target_market_ticker,
@@ -671,6 +691,9 @@ def _market_payload(market: MarketSnapshot) -> dict[str, Any]:
         "title": market.title,
         "yes_bid": market.yes_bid,
         "yes_ask": market.yes_ask,
+        "yes_bid_size": market.yes_bid_size,
+        "yes_ask_size": market.yes_ask_size,
+        "order_book_imbalance": market.order_book_imbalance,
         "yes_mid": market.yes_mid,
         "last_price": market.last_price,
         "spread_cents": market.spread_cents,
@@ -727,6 +750,14 @@ def _status_payload(service: DashboardService) -> dict[str, Any]:
         "cycle_sleep_s": service.cfg.cycle_sleep_s,
         "series_tickers": list(service.cfg.enabled_series_tickers()),
         "edge_threshold_cents": service.cfg.edge_threshold_cents,
+        "signal_algorithm": algorithm_label(service.cfg.signal_mode),
+        "signal_disclaimer": SIGNAL_DISCLAIMER,
+        "signal_mode": service.cfg.signal_mode,
+        "llm_model": service.cfg.llm_model,
+        "openai_configured": openai_configured(),
+        "gamma": service.cfg.gamma,
+        "kappa": service.cfg.kappa,
+        "use_ema_fallback": service.cfg.use_ema_fallback,
         "live_matches_only": service.cfg.live_matches_only,
         "trade_bitcoin": service.cfg.trade_bitcoin,
         "trade_tennis": service.cfg.trade_tennis,
@@ -764,7 +795,10 @@ def create_app(
 
     app = FastAPI(
         title="Rk Kalshi Paper Desk",
-        description="Local paper-trading dashboard. Live orders are disabled.",
+        description=(
+            "Local paper-trading dashboard. Signal is Avellaneda–Stoikov + "
+            "order-book imbalance. Live orders are disabled. Not financial advice."
+        ),
         lifespan=lifespan,
     )
     app.state.service = service
@@ -890,6 +924,7 @@ def create_app(
             live_matches_only=body.live_matches_only,
             trade_bitcoin=body.trade_bitcoin,
             trade_tennis=body.trade_tennis,
+            signal_mode=body.signal_mode,
         )
         continuous = bool(body.continuous) or body.cycles is None
         cycles = 1 if continuous else int(body.cycles or 1)
@@ -931,12 +966,7 @@ def create_app(
     @app.post("/api/account/connect")
     def account_connect(body: ConnectRequest) -> dict[str, Any]:
         try:
-            snapshot = service.account.connect(
-                body.api_key_id,
-                environment=body.environment or service.cfg.account_environment,
-                private_key_path=body.private_key_path,
-                private_key_pem=body.private_key_pem,
-            )
+            snapshot = service.account.connect_from_local()
         except AccountAuthError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         except AccountApiError as exc:

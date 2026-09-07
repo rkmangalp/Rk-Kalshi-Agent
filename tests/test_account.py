@@ -399,6 +399,33 @@ class AccountServiceTests(unittest.TestCase):
         self.assertEqual(missing.snapshot()["status"], "error")
         self.assertIn("not found", missing.snapshot()["message"])
 
+    def test_connect_from_local_uses_env_and_missing_message(self):
+        from rk_kalshi.account import MISSING_ENV_MESSAGE
+
+        store_path = self.root / "kalshi_account.json"
+        empty = AccountService(store_path=store_path, load_env=False)
+        with patch("rk_kalshi.account.credentials_from_env", return_value=None):
+            with self.assertRaises(AccountAuthError) as ctx:
+                empty.connect_from_local()
+        self.assertIn(".env", str(ctx.exception))
+        self.assertIn("never paste", str(ctx.exception).lower())
+        self.assertEqual(empty.snapshot()["status"], "error")
+        self.assertIn("never paste", empty.snapshot()["message"].lower())
+        self.assertIn("never paste", MISSING_ENV_MESSAGE.lower())
+
+        env = {
+            "KALSHI_API_KEY_ID": "a952bcbe-ec3b-4b5b-b8f9-11dae589608c",
+            "KALSHI_PRIVATE_KEY_PATH": str(self.key_path),
+            "KALSHI_ENVIRONMENT": "demo",
+        }
+        with patch.dict("os.environ", env, clear=False):
+            with patch("rk_kalshi.account.KalshiSignedClient", FakeSignedClient):
+                service = AccountService(store_path=store_path, load_env=False)
+                status = service.connect_from_local()
+        self.assertEqual(status["status"], "connected")
+        self.assertEqual(status["environment"], "demo")
+        self.assertFalse(status["live_trading_enabled"])
+
 
 if __name__ == "__main__":
     unittest.main()

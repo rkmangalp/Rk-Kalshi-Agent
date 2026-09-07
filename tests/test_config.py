@@ -15,8 +15,13 @@ class ConfigTests(unittest.TestCase):
         self.assertFalse(cfg.allow_size_up)
         self.assertEqual(cfg.min_fills_before_size_up, 200)
         self.assertEqual(cfg.edge_threshold_cents, 3.0)
+        self.assertAlmostEqual(cfg.gamma, 0.25)
+        self.assertAlmostEqual(cfg.kappa, 1.5)
+        self.assertAlmostEqual(cfg.sigma_floor, 0.04)
+        self.assertFalse(cfg.use_ema_fallback)
+        self.assertEqual(cfg.signal_mode, "as_obi")
+        self.assertEqual(cfg.llm_model, "gpt-4o-mini")
         self.assertFalse(cfg.live_enabled)
-        self.assertEqual(cfg.account_environment, "prod")
         self.assertTrue(cfg.live_matches_only)
         self.assertEqual(cfg.series_tickers, ("KXATPMATCH", "KXWTAMATCH", "KXITFWMATCH"))
         self.assertEqual(cfg.bitcoin_series_tickers, ("KXBTC15M", "KXBTCD"))
@@ -38,18 +43,26 @@ class ConfigTests(unittest.TestCase):
         self.assertGreater(cfg.starting_cash, 0)
         self.assertTrue(cfg.trade_bitcoin)
         self.assertEqual(cfg.bitcoin_series_tickers, ("KXBTC15M", "KXBTCD"))
+        self.assertAlmostEqual(cfg.gamma, 0.25)
+        self.assertAlmostEqual(cfg.kappa, 1.5)
+        self.assertFalse(cfg.use_ema_fallback)
+        self.assertEqual(cfg.signal_mode, "as_obi")
 
     def test_load_yaml_overrides(self):
         with tempfile.NamedTemporaryFile("w", suffix=".yaml", delete=False) as handle:
             handle.write(
                 "bankroll:\n  starting_cash: 80\n"
                 "risk:\n  max_dollars_per_ticker: 4\n"
+                "signal:\n  gamma: 0.4\n  obi_weight: 2.5\n  mode: hybrid\n"
             )
             path = handle.name
         cfg = load_config(path)
         self.assertEqual(cfg.starting_cash, 80.0)
         self.assertEqual(cfg.max_dollars_per_ticker, 4.0)
         self.assertFalse(cfg.allow_size_up)
+        self.assertAlmostEqual(cfg.gamma, 0.4)
+        self.assertAlmostEqual(cfg.kappa, 2.5)
+        self.assertEqual(cfg.signal_mode, "hybrid")
 
 
 if __name__ == "__main__":

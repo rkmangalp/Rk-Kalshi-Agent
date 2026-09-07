@@ -15,16 +15,23 @@ from rk_kalshi.models import (
     select_targeted_markets,
 )
 from rk_kalshi.risk import RiskManager
-from rk_kalshi.signal import TennisSignalEngine
+from rk_kalshi.signal import SignalEngine
+from rk_kalshi.llm import LlmResearchTrader
 from rk_kalshi.state import load_state, save_state
 
 
 class PaperRunner:
-    def __init__(self, cfg: AppConfig, client: KalshiPublicClient | None = None):
+    def __init__(
+        self,
+        cfg: AppConfig,
+        client: KalshiPublicClient | None = None,
+        llm: LlmResearchTrader | None = None,
+    ):
         self.cfg = cfg
         self.client = client or KalshiPublicClient(cfg)
         self.owns_client = client is None
-        self.signal = TennisSignalEngine(cfg)
+        self.signal = SignalEngine(cfg)
+        self.llm = llm if llm is not None else LlmResearchTrader(cfg)
         self.risk = RiskManager(cfg)
         self.paper = PaperExecution(cfg, self.risk)
         self.journal = FillJournal(cfg.fill_log_csv, cfg.fill_log_jsonl)
@@ -54,6 +61,7 @@ class PaperRunner:
     def run_once(self) -> list[Fill]:
         state = load_state(self.cfg)
         self.signal.load_ema(state.ema)
+        self.signal.load_mids(state.mid_history)
         now = time.time()
         has_target = bool(self.cfg.target_event_ticker or self.cfg.target_market_ticker)
         targeted: list[MarketSnapshot] = []
@@ -135,10 +143,14 @@ class PaperRunner:
             state.killed = True
             state.kill_reason = state.kill_reason or "daily loss kill-switch"
             state.ema = self.signal.dump_ema()
+            state.mid_history = self.signal.dump_mids()
             save_state(self.cfg, state)
             return []
 
-        signals = self.signal.evaluate(tradeable)
+        as_signals = self.signal.evaluate(tradeable, inventory=state)
+        signals = self.llm.refine(tradeable, as_signals, inventory=state)
+        if self.llm.last_note:
+            self.last_scan["llm_note"] = self.llm.last_note
         taken: list[Fill] = []
         for signal in signals:
             if len(taken) >= self.cfg.max_signals_per_cycle:
@@ -149,6 +161,7 @@ class PaperRunner:
                 if state.killed:
                     break
         state.ema = self.signal.dump_ema()
+        state.mid_history = self.signal.dump_mids()
         save_state(self.cfg, state)
         return taken
 

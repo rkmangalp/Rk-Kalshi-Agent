@@ -12,7 +12,7 @@ from rk_kalshi.models import MarketSnapshot
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="rk-kalshi",
-        description="Paper-trade Kalshi tennis markets. No live orders.",
+        description="Paper-trade Kalshi markets (Avellaneda–Stoikov + OBI). No live orders.",
     )
     parser.add_argument(
         "--config",
@@ -177,7 +177,7 @@ def _cmd_account(cfg) -> int:
             print(format_account_cli(None, status))
             print(
                 "not connected — set KALSHI_API_KEY_ID + KALSHI_PRIVATE_KEY_PATH "
-                "(or .env), or use the dashboard Connect form"
+                "in a local .env (never paste keys in the dashboard)"
             )
             return 1
         try:
