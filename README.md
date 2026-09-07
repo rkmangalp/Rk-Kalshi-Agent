@@ -2,8 +2,8 @@
 
 Paper-trading agent for Kalshi tennis and Bitcoin markets. Order placement is
 **paper-only**: it reads public Kalshi REST market data, computes a transparent
-edge, and simulates fills. You can **connect** a Kalshi API key to view your
-live balance, positions, fills, and orders. Connecting does **not** send
+edge, and simulates fills. You can **connect** (read-only) via local `.env` keys to view live
+balance, positions, fills, and orders. Connecting does **not** send
 live orders.
 
 Kalshi tennis contracts are binary YES/NO event contracts (typically “player X
@@ -142,11 +142,14 @@ unchanged.
 
 ## Connect Kalshi (read-only trades)
 
-The dashboard **Connect** form and `python -m rk_kalshi account` load your
+The dashboard **Connect** button and `python -m rk_kalshi account` load your
 real Kalshi balance, open positions, recent fills, and orders. This is a
 **live account view**, separate from the paper desk. Connecting does
 **not** turn on live order placement (`live.enabled` stays false; the
 “Enable live trading” checkbox is a disabled coming-soon stub).
+
+Keys are **not** entered in the UI. Connect reads only a local `.env`
+file (gitignored).
 
 ### Create API keys (demo + production)
 
@@ -161,10 +164,10 @@ Kalshi demo and production credentials are **not** interchangeable.
    - **API Key ID** (UUID shown on screen)
    - **Private key** (downloaded `.key` PEM — Kalshi cannot show it again)
 
-### Windows: store the key and connect
+### Windows: `.env` only
 
-Prefer a file path. Never commit `.key`, `.pem`, `.env`, or
-`data/kalshi_account.json`.
+Never commit `.key`, `.pem`, or `.env`. Do not paste keys into the
+dashboard.
 
 Command Prompt:
 
@@ -177,7 +180,7 @@ copy .env.example .env
 notepad .env
 ```
 
-In `.env` (or the dashboard form):
+`.env` (repo root):
 
 ```
 KALSHI_API_KEY_ID=a952bcbe-ec3b-4b5b-b8f9-11dae589608c
@@ -196,9 +199,6 @@ Then `python -m rk_kalshi dashboard` → **Connect**. Status shows
 Connected / Disconnected / Error. **Refresh** (optional auto-refresh)
 reloads the live trades panel. Public market reads still work without
 keys.
-
-Alternatively paste the PEM into the form; it is written only to
-`data/kalshi_private.key` (gitignored).
 
 ```bat
 python -m rk_kalshi account
@@ -221,7 +221,7 @@ Defaults live in `config.yaml`:
 | `signal.edge_threshold_cents` | `3.0` | Net edge after spread + fee |
 | `kalshi.series_tickers` | `KXATPMATCH`, `KXWTAMATCH`, `KXITFWMATCH` | Match series |
 | `live.enabled` | `false` | Cannot enable the live stub |
-| `account.environment` | `prod` | Default demo/prod for Connect (keys stay out of git) |
+| `account.environment` | `prod` | Unused by Connect — demo/prod comes from `.env` `KALSHI_ENVIRONMENT` |
 
 Public market-data base URL: `https://external-api.kalshi.com/trade-api/v2`.
 Those reads do not need API keys. Authenticated portfolio GETs use RSA-PSS

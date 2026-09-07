@@ -104,10 +104,6 @@ class StartRequest(BaseModel):
 
 
 class ConnectRequest(BaseModel):
-    environment: str = "prod"
-    api_key_id: str = ""
-    private_key_path: str | None = None
-    private_key_pem: str | None = None
     enable_live_trading: bool | None = None
     live: bool | None = None
     mode: str | None = None
@@ -931,12 +927,7 @@ def create_app(
     @app.post("/api/account/connect")
     def account_connect(body: ConnectRequest) -> dict[str, Any]:
         try:
-            snapshot = service.account.connect(
-                body.api_key_id,
-                environment=body.environment or service.cfg.account_environment,
-                private_key_path=body.private_key_path,
-                private_key_pem=body.private_key_pem,
-            )
+            snapshot = service.account.connect_from_env()
         except AccountAuthError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         except AccountApiError as exc:
@@ -948,7 +939,7 @@ def create_app(
             "paper_mode": True,
             "live_enabled": False,
             "read_only": True,
-            "note": "Connected for read-only portfolio view. Live order placement stays disabled.",
+            "note": "Connected from .env (read-only). Live order placement stays disabled.",
         }
 
     @app.post("/api/account/disconnect")

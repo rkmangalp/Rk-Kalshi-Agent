@@ -51,10 +51,6 @@
     accountBanner: $("account-banner"),
     accountPill: $("account-pill"),
     accountForm: $("account-form"),
-    accountEnv: $("account-env"),
-    accountKeyId: $("account-key-id"),
-    accountKeyPath: $("account-key-path"),
-    accountKeyPem: $("account-key-pem"),
     accountConn: $("account-conn"),
     accountHint: $("account-hint"),
     btnConnect: $("btn-connect"),
@@ -456,11 +452,7 @@
       els.accountHint.textContent = account.message
         || (status === "connected"
           ? `Read-only${suffix}. Live trading stays off.`
-          : "Create keys at Kalshi Account & security → API Keys (demo or prod).");
-    }
-    if (els.accountEnv && defaultEnv && !els.accountEnv.dataset.seeded) {
-      els.accountEnv.value = defaultEnv === "demo" ? "demo" : "prod";
-      els.accountEnv.dataset.seeded = "1";
+          : "Copy .env.example to .env (KALSHI_API_KEY_ID + KALSHI_PRIVATE_KEY_PATH), then Connect.");
     }
     if (els.enableLiveTrading) {
       els.enableLiveTrading.checked = false;
@@ -577,34 +569,17 @@
     }
   }
 
-  function pemPayload(path, pem) {
-    const text = String(pem || "").trim();
-    if (!text) return "";
-    const upper = text.toUpperCase();
-    const complete = upper.includes("-----BEGIN") && upper.includes("-----END")
-      && upper.includes("PRIVATE KEY");
-    if (path && !complete) return "";
-    return text;
-  }
-
   async function connectAccount() {
     if (els.btnConnect) els.btnConnect.disabled = true;
     try {
-      const path = (els.accountKeyPath && els.accountKeyPath.value.trim()) || "";
-      const pem = pemPayload(path, els.accountKeyPem && els.accountKeyPem.value);
       const payload = await fetchJSON("/api/account/connect", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          environment: (els.accountEnv && els.accountEnv.value) || "prod",
-          api_key_id: (els.accountKeyId && els.accountKeyId.value.trim()) || "",
-          private_key_path: path,
-          private_key_pem: pem,
           enable_live_trading: false,
           mode: "paper",
         }),
       });
-      if (els.accountKeyPem) els.accountKeyPem.value = "";
       renderAccountStatus(payload.account || {});
       await refreshPortfolio();
     } catch (err) {

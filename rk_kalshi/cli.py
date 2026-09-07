@@ -176,8 +176,7 @@ def _cmd_account(cfg) -> int:
         if status["status"] == "disconnected" and not status.get("api_key_id_suffix"):
             print(format_account_cli(None, status))
             print(
-                "not connected — set KALSHI_API_KEY_ID + KALSHI_PRIVATE_KEY_PATH "
-                "(or .env), or use the dashboard Connect form"
+                "not connected — set KALSHI_API_KEY_ID + KALSHI_PRIVATE_KEY_PATH in .env"
             )
             return 1
         try:

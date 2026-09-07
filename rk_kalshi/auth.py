@@ -28,6 +28,10 @@ ENV_KEY_PATH = "KALSHI_PRIVATE_KEY_PATH"
 ENV_KEY_PEM = "KALSHI_PRIVATE_KEY"
 ENV_ENVIRONMENT = "KALSHI_ENVIRONMENT"
 ENV_BASE_URL = "KALSHI_BASE_URL"
+MISSING_ENV_MESSAGE = (
+    "set KALSHI_API_KEY_ID and KALSHI_PRIVATE_KEY_PATH in .env "
+    "(copy .env.example; never commit .env or the .key file)"
+)
 
 
 class AccountAuthError(ValueError):
@@ -130,11 +134,12 @@ def parse_dotenv(path: str | Path) -> dict[str, str]:
     return out
 
 
-def load_dotenv_file(path: str | Path | None = None) -> dict[str, str]:
+def load_dotenv_file(path: str | Path | None = None, *, override: bool = False) -> dict[str, str]:
     env_path = Path(path) if path is not None else Path(".env")
     parsed = parse_dotenv(env_path)
     for key, value in parsed.items():
-        os.environ.setdefault(key, value)
+        if override or key not in os.environ:
+            os.environ[key] = value
     return parsed
 
 

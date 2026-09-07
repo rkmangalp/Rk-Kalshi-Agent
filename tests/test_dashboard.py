@@ -140,9 +140,13 @@ class DashboardApiTests(unittest.TestCase):
         self.assertIn("account-banner", response.text)
         self.assertIn("Live account view", response.text)
         self.assertIn("paper desk", response.text.lower())
-        self.assertIn("account-key-id", response.text)
-        self.assertIn("account-key-pem", response.text)
-        self.assertIn("Leave blank if using a file path.", response.text)
+        self.assertIn("KALSHI_API_KEY_ID", response.text)
+        self.assertIn("KALSHI_PRIVATE_KEY_PATH", response.text)
+        self.assertIn(".env", response.text)
+        self.assertNotIn("account-key-id", response.text)
+        self.assertNotIn("account-key-pem", response.text)
+        self.assertNotIn("account-key-path", response.text)
+        self.assertNotIn("Leave blank if using a file path.", response.text)
 
     def test_health_and_status_lock_paper_mode(self):
         health = self.http.get("/api/health")
@@ -525,77 +529,63 @@ class DashboardApiTests(unittest.TestCase):
         self.assertTrue(any("paper session cleared" in line for line in logs))
 
     def test_account_connect_is_read_only_and_rejects_live_trading(self):
-        from tests.test_account import FakeSignedClient, _pem, _rsa_key
+        import os
         from unittest.mock import patch
+
+        from rk_kalshi.auth import MISSING_ENV_MESSAGE
+        from tests.test_account import FakeSignedClient, _pem, _rsa_key
 
         live = self.http.post(
             "/api/account/connect",
-            json={
-                "api_key_id": "abcd",
-                "private_key_pem": "x",
-                "enable_live_trading": True,
-            },
+            json={"enable_live_trading": True},
         )
         self.assertEqual(live.status_code, 422)
 
-        live_mode = self.http.post(
-            "/api/account/connect",
-            json={"api_key_id": "abcd", "private_key_pem": "x", "mode": "live"},
-        )
+        live_mode = self.http.post("/api/account/connect", json={"mode": "live"})
         self.assertEqual(live_mode.status_code, 422)
 
         missing = self.http.get("/api/account/portfolio")
         self.assertEqual(missing.status_code, 409)
 
-        bad_path = self.http.post(
-            "/api/account/connect",
-            json={
-                "environment": "demo",
-                "api_key_id": "test-key-id-1234",
-                "private_key_path": r"C:\Users\Rk\.kalshi\missing.key",
-                "mode": "paper",
-            },
-        )
-        self.assertEqual(bad_path.status_code, 400)
+        with patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("KALSHI_API_KEY_ID", None)
+            os.environ.pop("KALSHI_PRIVATE_KEY_PATH", None)
+            with patch("rk_kalshi.account.load_dotenv_file", return_value={}):
+                no_env = self.http.post("/api/account/connect", json={"mode": "paper"})
+        self.assertEqual(no_env.status_code, 400)
+        self.assertIn("KALSHI_API_KEY_ID", no_env.json()["detail"])
+        self.assertIn("KALSHI_PRIVATE_KEY_PATH", no_env.json()["detail"])
+        self.assertEqual(no_env.json()["detail"], MISSING_ENV_MESSAGE)
         errored = self.http.get("/api/account").json()
         self.assertEqual(errored["status"], "error")
-        self.assertIn("not found", errored["message"])
 
         key_path = Path(self.tmp.name) / "kalshi.key"
         key_path.write_text(_pem(_rsa_key()), encoding="utf-8")
-        with patch("rk_kalshi.account.KalshiSignedClient", FakeSignedClient):
-            path_and_stub = self.http.post(
+        env = {
+            "KALSHI_API_KEY_ID": "a952bcbe-ec3b-4b5b-b8f9-11dae589608c",
+            "KALSHI_PRIVATE_KEY_PATH": str(key_path),
+            "KALSHI_ENVIRONMENT": "demo",
+        }
+        with patch.dict(os.environ, env, clear=False), patch(
+            "rk_kalshi.account.load_dotenv_file", return_value={}
+        ), patch("rk_kalshi.account.KalshiSignedClient", FakeSignedClient):
+            ignored_body = self.http.post(
                 "/api/account/connect",
                 json={
-                    "environment": "demo",
-                    "api_key_id": "a952bcbe-ec3b-4b5b-b8f9-11dae589608c",
-                    "private_key_path": str(key_path),
+                    "api_key_id": "should-be-ignored",
                     "private_key_pem": "-----BEGIN RSA PRIVATE KEY-----",
+                    "private_key_path": r"C:\Users\Rk\.kalshi\missing.key",
                     "enable_live_trading": False,
                     "mode": "paper",
                 },
             )
-        self.assertEqual(path_and_stub.status_code, 200)
-        self.assertEqual(path_and_stub.json()["account"]["status"], "connected")
-
-        key = _rsa_key()
-        with patch("rk_kalshi.account.KalshiSignedClient", FakeSignedClient):
-            connected = self.http.post(
-                "/api/account/connect",
-                json={
-                    "environment": "demo",
-                    "api_key_id": "a952bcbe-ec3b-4b5b-b8f9-11dae589608c",
-                    "private_key_pem": _pem(key),
-                    "enable_live_trading": False,
-                    "mode": "paper",
-                },
-            )
-        self.assertEqual(connected.status_code, 200)
-        body = connected.json()
+        self.assertEqual(ignored_body.status_code, 200)
+        body = ignored_body.json()
         self.assertFalse(body["live_enabled"])
         self.assertTrue(body["read_only"])
         self.assertEqual(body["account"]["status"], "connected")
-        self.assertIn("read-only", body["note"].lower())
+        self.assertEqual(body["account"]["environment"], "demo")
+        self.assertIn(".env", body["note"].lower())
 
         book = self.http.get("/api/account/portfolio")
         self.assertEqual(book.status_code, 200)

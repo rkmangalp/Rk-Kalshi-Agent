@@ -15,7 +15,6 @@ from cryptography.hazmat.primitives.asymmetric import padding, rsa
 from rk_kalshi.account import (
     AccountApiError,
     AccountService,
-    AccountStore,
     KalshiSignedClient,
     LIVE_TRADING_MESSAGE,
     format_account_cli,
@@ -328,25 +327,23 @@ class AccountServiceTests(unittest.TestCase):
     def tearDown(self):
         self.tmp.cleanup()
 
-    def test_connect_persists_store_and_loads_portfolio(self):
+    def test_connect_from_env_loads_portfolio_without_writing_store(self):
         store_path = self.root / "kalshi_account.json"
+        env = {
+            "KALSHI_API_KEY_ID": "a952bcbe-ec3b-4b5b-b8f9-11dae589608c",
+            "KALSHI_PRIVATE_KEY_PATH": str(self.key_path),
+            "KALSHI_ENVIRONMENT": "demo",
+        }
         with patch("rk_kalshi.account.KalshiSignedClient", FakeSignedClient):
             service = AccountService(store_path=store_path, load_env=False)
-            status = service.connect(
-                "a952bcbe-ec3b-4b5b-b8f9-11dae589608c",
-                environment="demo",
-                private_key_path=str(self.key_path),
-            )
+            status = service.connect_from_env(env)
             self.assertEqual(status["status"], "connected")
             self.assertEqual(status["environment"], "demo")
             self.assertTrue(status["read_only"])
             self.assertFalse(status["live_trading_enabled"])
             self.assertIn("LIVE ACCOUNT VIEW", status["banner"])
             self.assertIn("DEMO", status["banner"])
-            self.assertTrue(store_path.exists())
-            stored = store_path.read_text(encoding="utf-8")
-            self.assertIn("a952bcbe", stored)
-            self.assertNotIn("BEGIN", stored)
+            self.assertFalse(store_path.exists())
             book = service.portfolio()
             self.assertAlmostEqual(book["balance"], 101.0)
             self.assertEqual(len(book["positions"]), 1)
@@ -358,23 +355,15 @@ class AccountServiceTests(unittest.TestCase):
             self.assertIn("balance: $101.00", text)
             disconnected = service.disconnect()
             self.assertEqual(disconnected["status"], "disconnected")
-            self.assertFalse(store_path.exists())
 
-    def test_pasted_pem_writes_gitignored_key_file(self):
-        store_path = self.root / "kalshi_account.json"
-        with patch("rk_kalshi.account.KalshiSignedClient", FakeSignedClient):
-            service = AccountService(store_path=store_path, load_env=False)
-            service.connect(
-                "abcd1234",
-                environment="prod",
-                private_key_pem=_pem(self.key),
-            )
-        key_file = self.root / "kalshi_private.key"
-        self.assertTrue(key_file.exists())
-        self.assertIn("BEGIN", key_file.read_text(encoding="utf-8"))
-        record = AccountStore(store_path).load_record()
-        self.assertEqual(record["environment"], "prod")
-        self.assertEqual(record["private_key_path"], str(key_file))
+    def test_connect_from_env_requires_key_id_and_path(self):
+        from rk_kalshi.auth import MISSING_ENV_MESSAGE
+
+        service = AccountService(store_path=self.root / "kalshi_account.json", load_env=False)
+        with self.assertRaises(AccountAuthError) as ctx:
+            service.connect_from_env({})
+        self.assertEqual(str(ctx.exception), MISSING_ENV_MESSAGE)
+        self.assertEqual(service.snapshot()["status"], "error")
 
     def test_connect_does_not_persist_on_auth_failure(self):
         store_path = self.root / "kalshi_account.json"
@@ -386,7 +375,13 @@ class AccountServiceTests(unittest.TestCase):
         with patch("rk_kalshi.account.KalshiSignedClient", Boom):
             service = AccountService(store_path=store_path, load_env=False)
             with self.assertRaises(AccountApiError):
-                service.connect("abcd1234", environment="demo", private_key_path=str(self.key_path))
+                service.connect_from_env(
+                    {
+                        "KALSHI_API_KEY_ID": "abcd1234",
+                        "KALSHI_PRIVATE_KEY_PATH": str(self.key_path),
+                        "KALSHI_ENVIRONMENT": "demo",
+                    }
+                )
             snap = service.snapshot()
             self.assertEqual(snap["status"], "error")
             self.assertEqual(snap["environment"], "demo")
@@ -395,7 +390,13 @@ class AccountServiceTests(unittest.TestCase):
 
         missing = AccountService(store_path=self.root / "other.json", load_env=False)
         with self.assertRaises(AccountAuthError):
-            missing.connect("abcd1234", environment="prod", private_key_path=str(self.root / "nope.key"))
+            missing.connect_from_env(
+                {
+                    "KALSHI_API_KEY_ID": "abcd1234",
+                    "KALSHI_PRIVATE_KEY_PATH": str(self.root / "nope.key"),
+                    "KALSHI_ENVIRONMENT": "prod",
+                }
+            )
         self.assertEqual(missing.snapshot()["status"], "error")
         self.assertIn("not found", missing.snapshot()["message"])
 

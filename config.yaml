@@ -63,10 +63,8 @@ paper:
   max_signals_per_cycle: 8
 
 account:
-  # Read-only portfolio view. Credentials come from env / .env /
-  # or the dashboard Connect form (gitignored local store).
-  # demo → https://external-api.demo.kalshi.co/trade-api/v2
-  # prod → https://external-api.kalshi.com/trade-api/v2
+  # Read-only portfolio. Connect uses .env (KALSHI_API_KEY_ID +
+  # KALSHI_PRIVATE_KEY_PATH). Demo vs prod is KALSHI_ENVIRONMENT.
   environment: prod
 
 live:
