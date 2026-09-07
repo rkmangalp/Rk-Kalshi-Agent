@@ -114,6 +114,7 @@ class LlmTraderTests(unittest.TestCase):
         self.assertIn("anticipat", user["instruction"].lower())
         self.assertIn("in_play", user["markets"][0])
         self.assertIn("momentum", fake.messages[0]["content"].lower())
+        self.assertIn("hold vs break", fake.messages[0]["content"].lower())
 
     def test_llm_mode_fee_gate_blocks_tiny_estimate(self):
         market = _market()

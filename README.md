@@ -94,16 +94,28 @@ Optional: `python3 -m pip install -e .` then `rk-kalshi list-tennis-markets`.
 
 ## Dashboard (Windows)
 
-The dashboard is a local FastAPI app: a **Start** page picks a
-**category** (ATP / WTA / Challenger / ITF / Bitcoin 15m / daily), then a
-**live match or market** from Kalshi’s public API, then a trading mode
-(**Safe**, **Conservative**, **Active**, **Aggressive**). Modes change
-paper knobs only: edge threshold, max $ / trade, contract size, max
-spread, poll interval, and AS `gamma` / OBI `kappa`. Paste **any Kalshi
-market or event URL** as an optional fallback. The paper signal is
-**Avellaneda–Stoikov + order-book imbalance**. It is not a match
-predictor and not financial advice. API keys are never entered in the UI
-(`.env` only).
+The dashboard is a local FastAPI app. Defaults for **run research now**:
+trading mode **Active**, paper signal **Hybrid** (AS+OBI filter, ChatGPT
+anticipation confirm). Pick a **category** (ATP / WTA / Challenger / ITF /
+Bitcoin 15m / daily), then a **live match or market**, then Start.
+Modes (**Safe**, **Conservative**, **Active**, **Aggressive**) change
+paper knobs only. Paste a Kalshi URL as an optional fallback.
+API keys are never entered in the UI (`.env` only).
+
+To run Hybrid research on Windows, put this in `.env` next to `config.yaml`
+(never paste keys in the dashboard):
+
+```
+KALSHI_API_KEY_ID=...
+KALSHI_PRIVATE_KEY_PATH=C:\Users\Rk\.kalshi\kalshi.key
+KALSHI_ENVIRONMENT=prod
+OPENAI_API_KEY=sk-...
+```
+
+Then `python -m rk_kalshi dashboard` → pick category + live match → leave
+**Active** and **Hybrid** → Start. ChatGPT is asked to anticipate score /
+momentum swings and how those map to YES/NO mids. It is slow versus the
+book, costs tokens, and is **not** a guaranteed edge. Live orders stay off.
 
 Example Kalshi URLs:
 

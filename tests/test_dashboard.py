@@ -120,6 +120,8 @@ class DashboardApiTests(unittest.TestCase):
         self.assertIn("match-select", response.text)
         self.assertIn("trade-style", response.text)
         self.assertIn("trade-style-hint", response.text)
+        self.assertIn('value="active" selected', response.text)
+        self.assertIn('value="hybrid" selected', response.text)
         self.assertIn("Category / live match", response.text)
         self.assertNotIn("id=\"trade-bitcoin\"", response.text)
         self.assertNotIn("id=\"contract-select\"", response.text)
