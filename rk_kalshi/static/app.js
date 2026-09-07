@@ -577,17 +577,29 @@
     }
   }
 
+  function pemPayload(path, pem) {
+    const text = String(pem || "").trim();
+    if (!text) return "";
+    const upper = text.toUpperCase();
+    const complete = upper.includes("-----BEGIN") && upper.includes("-----END")
+      && upper.includes("PRIVATE KEY");
+    if (path && !complete) return "";
+    return text;
+  }
+
   async function connectAccount() {
     if (els.btnConnect) els.btnConnect.disabled = true;
     try {
+      const path = (els.accountKeyPath && els.accountKeyPath.value.trim()) || "";
+      const pem = pemPayload(path, els.accountKeyPem && els.accountKeyPem.value);
       const payload = await fetchJSON("/api/account/connect", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           environment: (els.accountEnv && els.accountEnv.value) || "prod",
           api_key_id: (els.accountKeyId && els.accountKeyId.value.trim()) || "",
-          private_key_path: (els.accountKeyPath && els.accountKeyPath.value.trim()) || "",
-          private_key_pem: (els.accountKeyPem && els.accountKeyPem.value.trim()) || "",
+          private_key_path: path,
+          private_key_pem: pem,
           enable_live_trading: false,
           mode: "paper",
         }),
