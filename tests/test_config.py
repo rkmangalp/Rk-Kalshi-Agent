@@ -22,6 +22,8 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(cfg.signal_mode, "as_obi")
         self.assertEqual(cfg.llm_model, "gpt-4o-mini")
         self.assertFalse(cfg.live_enabled)
+        self.assertEqual(cfg.live_max_dollars_per_ticker, 20.0)
+        self.assertEqual(cfg.live_daily_loss_limit, 20.0)
         self.assertTrue(cfg.live_matches_only)
         self.assertEqual(
             cfg.series_tickers,
@@ -40,7 +42,8 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(cfg.min_fills_before_size_up, 200)
         self.assertFalse(cfg.allow_martingale)
         self.assertFalse(cfg.live_enabled)
-        self.assertEqual(cfg.live_daily_loss_limit, 10.0)
+        self.assertEqual(cfg.live_max_dollars_per_ticker, 20.0)
+        self.assertEqual(cfg.live_daily_loss_limit, 20.0)
         self.assertEqual(cfg.account_environment, "prod")
         self.assertTrue(cfg.live_matches_only)
         self.assertGreater(cfg.max_dollars_per_ticker, 0)

@@ -68,8 +68,8 @@ class AppConfig:
     max_signals_per_cycle: int = 8
     live_enabled: bool = False
     live_state_path: Path = Path("data/live_state.json")
-    live_max_dollars_per_ticker: float = 5.0
-    live_daily_loss_limit: float = 10.0
+    live_max_dollars_per_ticker: float = 20.0
+    live_daily_loss_limit: float = 20.0
     account_environment: str = "prod"
     target_url: str = ""
     target_event_ticker: str = ""
@@ -172,7 +172,7 @@ def config_from_mapping(raw: dict[str, Any]) -> AppConfig:
         max_signals_per_cycle=int(paper.get("max_signals_per_cycle", 8)),
         live_enabled=bool(live.get("enabled", False)),
         live_state_path=Path(live.get("state_path", "data/live_state.json")),
-        live_max_dollars_per_ticker=float(live.get("max_dollars_per_ticker", 5.0)),
-        live_daily_loss_limit=float(live.get("daily_loss_limit", 10.0)),
+        live_max_dollars_per_ticker=float(live.get("max_dollars_per_ticker", 20.0)),
+        live_daily_loss_limit=float(live.get("daily_loss_limit", 20.0)),
         account_environment=str(account.get("environment") or "prod"),
     )

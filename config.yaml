@@ -92,9 +92,9 @@ account:
 
 live:
   # Default off. Dashboard Live toggle is required even if this is true.
-  # CLI paper-run never posts orders. Hard ceilings live in code ($10/trade,
+  # CLI paper-run never posts orders. Hard ceilings live in code ($20/trade,
   # $25 daily loss) and cannot be raised from this file.
   enabled: false
-  max_dollars_per_ticker: 5.0
-  daily_loss_limit: 10.0
+  max_dollars_per_ticker: 20.0
+  daily_loss_limit: 20.0
   state_path: data/live_state.json
