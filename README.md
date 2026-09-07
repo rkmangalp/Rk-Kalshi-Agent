@@ -94,13 +94,16 @@ Optional: `python3 -m pip install -e .` then `rk-kalshi list-tennis-markets`.
 
 ## Dashboard (Windows)
 
-The dashboard is a local FastAPI app: a **Start** page sets paper bankroll
-(default $100), max $ per trade, and daily loss, then polls until **Stop**.
-Paste **any Kalshi market or event URL** to lock paper trading to that
-event’s contracts — not a whitelist of ATP/WTA/ITF/Bitcoin series.
-Challenger, Bitcoin 15-minute books, and other `KX…` events all work.
-The paper signal is named on the desk: **Avellaneda–Stoikov + order-book
-imbalance**. It is not a match predictor and not financial advice.
+The dashboard is a local FastAPI app: a **Start** page picks a
+**category** (ATP / WTA / Challenger / ITF / Bitcoin 15m / daily), then a
+**live match or market** from Kalshi’s public API, then a trading mode
+(**Safe**, **Conservative**, **Active**, **Aggressive**). Modes change
+paper knobs only: edge threshold, max $ / trade, contract size, max
+spread, poll interval, and AS `gamma` / OBI `kappa`. Paste **any Kalshi
+market or event URL** as an optional fallback. The paper signal is
+**Avellaneda–Stoikov + order-book imbalance**. It is not a match
+predictor and not financial advice. API keys are never entered in the UI
+(`.env` only).
 
 Example Kalshi URLs:
 
@@ -223,14 +226,20 @@ prints the same read-only snapshot in the terminal.
 Set `OPENAI_API_KEY` in the same local `.env`. There is **no** OpenAI key
 field on the dashboard. In `config.yaml` (or the Start panel):
 
-- `signal.mode: as_obi` — local Avellaneda–Stoikov + order-book imbalance (default)
-- `signal.mode: hybrid` — AS+OBI proposes candidates; ChatGPT confirms or skips
+- `signal.mode: as_obi` — local Avellaneda–Stoikov + order-book imbalance
+- `signal.mode: hybrid` — AS+OBI proposes; ChatGPT confirms/skips with
+  forward-looking (anticipation) research (default in `config.yaml`)
 - `signal.mode: llm` — ChatGPT proposes paper buy/sell (still fee- and risk-gated)
 
 Default model is `gpt-4o-mini` (`signal.llm_model`). Calls are rate-limited
-(`llm_min_interval_s`). LLM research is **slow** versus the book, costs API
-tokens, and is **not** a guaranteed edge or a match predictor. Live orders
-stay disabled.
+(`llm_min_interval_s`). In hybrid/llm the model is asked to anticipate near-term
+tennis score/momentum swings (or short-horizon Bitcoin drift) and map those to
+YES/NO mid moves — not just restate the current odds. That research is
+**advisory**, **slow** versus the book, costs API tokens, and is **not** a
+guaranteed edge or a match predictor. Live orders stay disabled.
+
+Start-panel trading modes (paper knobs only): **Safe**, **Conservative**,
+**Active** (default), **Aggressive**.
 
 ## Config
 
@@ -249,9 +258,9 @@ Defaults live in `config.yaml`:
 | `signal.kappa` | `1.5` | Order-book imbalance weight (`obi_weight` alias) |
 | `signal.sigma_floor` | `0.04` | Minimum mid volatility in probability space |
 | `signal.use_ema_fallback` | `false` | Optional last-print / EMA fair when OBI and inventory are idle |
-| `signal.mode` | `as_obi` | `as_obi` (local), `hybrid`, or `llm` (ChatGPT; key from `.env`) |
+| `signal.mode` | `hybrid` | `as_obi` (local), `hybrid`, or `llm` (ChatGPT; key from `.env`) |
 | `signal.llm_model` | `gpt-4o-mini` | OpenAI model for llm/hybrid paper research |
-| `kalshi.series_tickers` | `KXATPMATCH`, `KXWTAMATCH`, `KXITFWMATCH` | Match series |
+| `kalshi.series_tickers` | `KXATPMATCH`, `KXWTAMATCH`, `KXITFWMATCH`, `KXITFMMATCH`, `KXATPCHALLENGERMATCH` | Match series |
 | `live.enabled` | `false` | Cannot enable the live stub |
 | `account.environment` | `prod` | Default demo/prod if `.env` omits `KALSHI_ENVIRONMENT` |
 

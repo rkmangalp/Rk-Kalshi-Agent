@@ -32,11 +32,24 @@ from rk_kalshi.account import (
     default_store_path,
 )
 from rk_kalshi.auth import AccountAuthError
+from rk_kalshi.catalog import (
+    apply_category,
+    catalog_events,
+    catalog_series_tickers,
+    categories_payload,
+    normalize_category_id,
+    trade_flags_for_category,
+)
 from rk_kalshi.client import KalshiPublicClient
 from rk_kalshi.config import AppConfig, load_config
 from rk_kalshi.journal import clear_fill_logs, read_fills, summarize_pnl
 from rk_kalshi.kalshi_url import EXAMPLE_CONTRACT_URLS, KalshiUrlError, parse_contract
 from rk_kalshi.models import MarketSnapshot, select_bitcoin_tradeable
+from rk_kalshi.presets import (
+    apply_trade_style,
+    presets_payload,
+    trade_style as preset_for,
+)
 from rk_kalshi.risk import RiskManager
 from rk_kalshi.runner import PaperRunner
 from rk_kalshi.schema import FILL_FIELDS
@@ -97,6 +110,8 @@ class StartRequest(BaseModel):
     target_url: str | None = None
     target_event_ticker: str | None = None
     target_market_ticker: str | None = None
+    trade_style: str | None = None
+    category_id: str | None = None
     live: bool | None = None
     mode: str | None = None
 
@@ -407,10 +422,18 @@ class DashboardService:
         target_event_ticker: str | None = None,
         target_market_ticker: str | None = None,
         target_label: str | None = None,
+        trade_style: str | None = None,
+        category_id: str | None = None,
     ) -> dict[str, Any]:
         sleep_s = self.cfg.cycle_sleep_s if cycle_sleep_s is None else cycle_sleep_s
+        cfg = replace(self.cfg, live_enabled=False)
+        if (trade_style or "").strip():
+            cfg = apply_trade_style(cfg, trade_style)
+        if (category_id or "").strip():
+            cfg = apply_category(cfg, category_id)
+            trade_tennis, trade_bitcoin = trade_flags_for_category(cfg.target_category_id)
         cfg = replace(
-            self.cfg,
+            cfg,
             starting_cash=float(starting_cash),
             max_dollars_per_ticker=float(max_dollars_per_ticker),
             daily_loss_limit=float(daily_loss_limit),
@@ -433,6 +456,7 @@ class DashboardService:
         self.bind_config(cfg)
         applied = _apply_bankroll_state(cfg)
         persisted = _persist_session(cfg, self.config_path)
+        preset = preset_for(cfg.trade_style)
         return {
             "paper_mode": True,
             "live_enabled": False,
@@ -444,6 +468,14 @@ class DashboardService:
             "trade_bitcoin": cfg.trade_bitcoin,
             "trade_tennis": cfg.trade_tennis,
             "signal_mode": cfg.signal_mode,
+            "trade_style": cfg.trade_style,
+            "trade_style_blurb": preset.blurb,
+            "target_category_id": cfg.target_category_id,
+            "edge_threshold_cents": cfg.edge_threshold_cents,
+            "gamma": cfg.gamma,
+            "kappa": cfg.kappa,
+            "base_contracts": cfg.base_contracts,
+            "max_spread_cents": cfg.max_spread_cents,
             "target": self.target_payload(cfg),
             "can_size_up": False,
             "allow_size_up": cfg.allow_size_up,
@@ -512,6 +544,7 @@ class DashboardService:
             target_market_ticker="",
             target_label="",
             target_asset_class="",
+            target_category_id="",
             live_enabled=False,
         )
         self.last_contract_error = ""
@@ -575,7 +608,7 @@ def _cfg_from_session(cfg: AppConfig) -> AppConfig:
     raw = _read_session(cfg)
     if not raw:
         return cfg
-    return replace(
+    restored = replace(
         cfg,
         starting_cash=float(raw.get("starting_cash", cfg.starting_cash)),
         max_dollars_per_ticker=float(raw.get("max_dollars_per_ticker", cfg.max_dollars_per_ticker)),
@@ -592,6 +625,27 @@ def _cfg_from_session(cfg: AppConfig) -> AppConfig:
         target_asset_class=str(raw.get("target_asset_class") or cfg.target_asset_class),
         live_enabled=False,
     )
+    style = str(raw.get("trade_style") or "")
+    if style:
+        restored = apply_trade_style(restored, style)
+    category = str(raw.get("target_category_id") or "")
+    if category:
+        restored = apply_category(restored, category)
+    return replace(
+        restored,
+        starting_cash=float(raw.get("starting_cash", restored.starting_cash)),
+        max_dollars_per_ticker=float(raw.get("max_dollars_per_ticker", restored.max_dollars_per_ticker)),
+        daily_loss_limit=float(raw.get("daily_loss_limit", restored.daily_loss_limit)),
+        cycle_sleep_s=float(raw.get("cycle_sleep_s", restored.cycle_sleep_s)),
+        live_matches_only=bool(raw.get("live_matches_only", restored.live_matches_only)),
+        signal_mode=str(raw.get("signal_mode") or restored.signal_mode),
+        target_url=str(raw.get("target_url") or restored.target_url),
+        target_event_ticker=str(raw.get("target_event_ticker") or restored.target_event_ticker),
+        target_market_ticker=str(raw.get("target_market_ticker") or restored.target_market_ticker),
+        target_label=str(raw.get("target_label") or restored.target_label),
+        target_asset_class=str(raw.get("target_asset_class") or restored.target_asset_class),
+        live_enabled=False,
+    )
 
 
 def _persist_session(cfg: AppConfig, config_path: Path | None) -> dict[str, bool]:
@@ -604,6 +658,8 @@ def _persist_session(cfg: AppConfig, config_path: Path | None) -> dict[str, bool
         "trade_bitcoin": cfg.trade_bitcoin,
         "trade_tennis": cfg.trade_tennis,
         "signal_mode": cfg.signal_mode,
+        "trade_style": cfg.trade_style,
+        "target_category_id": cfg.target_category_id,
         "target_url": cfg.target_url,
         "target_event_ticker": cfg.target_event_ticker,
         "target_market_ticker": cfg.target_market_ticker,
@@ -757,10 +813,16 @@ def _status_payload(service: DashboardService) -> dict[str, Any]:
         "openai_configured": openai_configured(),
         "gamma": service.cfg.gamma,
         "kappa": service.cfg.kappa,
+        "base_contracts": service.cfg.base_contracts,
+        "max_spread_cents": service.cfg.max_spread_cents,
         "use_ema_fallback": service.cfg.use_ema_fallback,
         "live_matches_only": service.cfg.live_matches_only,
         "trade_bitcoin": service.cfg.trade_bitcoin,
         "trade_tennis": service.cfg.trade_tennis,
+        "trade_style": service.cfg.trade_style,
+        "trade_style_blurb": preset_for(service.cfg.trade_style).blurb,
+        "target_category_id": service.cfg.target_category_id,
+        "categories": categories_payload(),
         "bitcoin_series_tickers": list(service.cfg.bitcoin_series_tickers),
         "target": service.target_payload(),
         "run": service.controller.snapshot(),
@@ -903,9 +965,15 @@ def create_app(
     def start_session(body: StartRequest) -> dict[str, Any]:
         if service.controller.snapshot()["running"]:
             raise HTTPException(status_code=409, detail="paper-run already in progress")
-        if not body.trade_bitcoin and not body.trade_tennis:
+        category = normalize_category_id(body.category_id)
+        trade_bitcoin = body.trade_bitcoin
+        trade_tennis = body.trade_tennis
+        if category:
+            trade_tennis, trade_bitcoin = trade_flags_for_category(category)
+        if not trade_bitcoin and not trade_tennis:
             raise HTTPException(status_code=400, detail="select Bitcoin and/or tennis")
-        if body.target_url or body.target_event_ticker or body.target_market_ticker:
+        has_target = bool(body.target_url or body.target_event_ticker or body.target_market_ticker)
+        if has_target:
             try:
                 service.set_contract(
                     ContractRequest(
@@ -916,15 +984,19 @@ def create_app(
                 )
             except HTTPException:
                 raise
+        elif category:
+            service.set_contract(ContractRequest())
         session = service.apply_session(
             starting_cash=body.starting_cash,
             max_dollars_per_ticker=body.max_dollars_per_ticker,
             daily_loss_limit=body.daily_loss_limit,
             cycle_sleep_s=body.sleep_s,
             live_matches_only=body.live_matches_only,
-            trade_bitcoin=body.trade_bitcoin,
-            trade_tennis=body.trade_tennis,
+            trade_bitcoin=trade_bitcoin,
+            trade_tennis=trade_tennis,
             signal_mode=body.signal_mode,
+            trade_style=body.trade_style,
+            category_id=body.category_id,
         )
         continuous = bool(body.continuous) or body.cycles is None
         cycles = 1 if continuous else int(body.cycles or 1)
@@ -941,6 +1013,39 @@ def create_app(
     @app.post("/api/logs/clear")
     def clear_logs() -> dict[str, Any]:
         return service.controller.clear_logs()
+
+    @app.get("/api/presets")
+    def presets() -> dict[str, Any]:
+        return presets_payload()
+
+    @app.get("/api/catalog")
+    def catalog(category: str = "") -> dict[str, Any]:
+        try:
+            snapshots, latency_ms = service.client.list_markets(catalog_series_tickers())
+        except Exception as exc:  # noqa: BLE001 — HTTP client / parse errors
+            raise HTTPException(status_code=502, detail=f"Kalshi public API error: {exc}") from exc
+        now = time.time()
+        events = catalog_events(
+            snapshots,
+            now,
+            category_id=category,
+            live_only=True,
+            pre_start_s=max(0.0, service.cfg.live_pre_start_minutes) * 60.0,
+            max_duration_s=max(0.1, service.cfg.live_max_hours) * 3600.0,
+            near_money_low=service.cfg.bitcoin_near_money_low,
+            near_money_high=service.cfg.bitcoin_near_money_high,
+        )
+        cid = normalize_category_id(category) or "all"
+        return {
+            "paper_mode": True,
+            "live_enabled": False,
+            "category_id": cid,
+            "categories": categories_payload(),
+            "events": events,
+            "count": len(events),
+            "latency_ms": round(float(latency_ms), 3),
+            "series": list(catalog_series_tickers()),
+        }
 
     @app.get("/api/contract")
     def get_contract() -> dict[str, Any]:

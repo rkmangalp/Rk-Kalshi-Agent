@@ -295,10 +295,24 @@ h1 {
   font-size: 0.78rem;
 }
 
-.contract-actions {
+.catalog-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.75rem;
+}
+
+.catalog-row label {
   display: flex;
-  gap: 0.5rem;
-  flex-wrap: wrap;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+#trade-style-hint {
+  color: var(--lock);
+}
+
+@media (max-width: 720px) {
+  .catalog-row { grid-template-columns: 1fr; }
 }
 
 .examples code {

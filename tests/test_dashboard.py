@@ -116,7 +116,13 @@ class DashboardApiTests(unittest.TestCase):
         self.assertNotIn("Place live order", response.text)
         self.assertIn("Start paper trading", response.text)
         self.assertIn("Live tennis matches only", response.text)
-        self.assertIn("Bitcoin (buy and sell YES)", response.text)
+        self.assertIn("category-select", response.text)
+        self.assertIn("match-select", response.text)
+        self.assertIn("trade-style", response.text)
+        self.assertIn("trade-style-hint", response.text)
+        self.assertIn("Category / live match", response.text)
+        self.assertNotIn("id=\"trade-bitcoin\"", response.text)
+        self.assertNotIn("id=\"contract-select\"", response.text)
         self.assertIn("local time", response.text)
         self.assertIn("fills-time-head", response.text)
         self.assertIn("app.js?v=", response.text)
@@ -131,8 +137,7 @@ class DashboardApiTests(unittest.TestCase):
         self.assertIn("kalshi.com/markets/kxatpmatch", response.text)
         self.assertIn("kxbtc15m/bitcoin-price-up-down", response.text)
         self.assertIn("kxatpchallengermatch", response.text)
-        self.assertIn("Paste any Kalshi market or event URL", response.text)
-        self.assertIn("Contract / match", response.text)
+        self.assertIn("Optional: paste any Kalshi market or event URL", response.text)
         self.assertIn("not a live Kalshi account", response.text)
         self.assertIn("Avellaneda", response.text)
         self.assertIn("order-book imbalance", response.text)
@@ -610,6 +615,126 @@ class DashboardApiTests(unittest.TestCase):
         self.assertEqual(gone.status_code, 200)
         self.assertEqual(gone.json()["account"]["status"], "disconnected")
         self.assertFalse(gone.json()["live_enabled"])
+
+    def test_presets_and_catalog_and_start_mode(self):
+        presets = self.http.get("/api/presets")
+        self.assertEqual(presets.status_code, 200)
+        body = presets.json()
+        self.assertFalse(body["live_enabled"])
+        ids = [row["id"] for row in body["styles"]]
+        self.assertEqual(ids, ["safe", "conservative", "active", "aggressive"])
+        aggressive = next(row for row in body["styles"] if row["id"] == "aggressive")
+        safe = next(row for row in body["styles"] if row["id"] == "safe")
+        self.assertGreater(safe["edge_threshold_cents"], aggressive["edge_threshold_cents"])
+        self.assertLess(safe["max_dollars_per_ticker"], aggressive["max_dollars_per_ticker"])
+
+        now = time.time()
+        live_atp = MarketSnapshot(
+            ticker="KXATPMATCH-LIVE-AAA",
+            event_ticker="KXATPMATCH-LIVE",
+            event_name="Live ATP",
+            title="Ada wins",
+            yes_bid=0.40,
+            yes_ask=0.42,
+            last_price=0.41,
+            volume=10.0,
+            updated_ts=now,
+            status="open",
+            series_ticker="KXATPMATCH",
+            occurrence_ts=now,
+        )
+        upcoming = MarketSnapshot(
+            ticker="KXATPMATCH-NEXT-AAA",
+            event_ticker="KXATPMATCH-NEXT",
+            event_name="Upcoming ATP",
+            title="Bea wins",
+            yes_bid=0.40,
+            yes_ask=0.42,
+            last_price=0.41,
+            volume=10.0,
+            updated_ts=now,
+            status="open",
+            series_ticker="KXATPMATCH",
+            occurrence_ts=now + 4 * 3600,
+        )
+        wta = MarketSnapshot(
+            ticker="KXWTAMATCH-LIVE-AAA",
+            event_ticker="KXWTAMATCH-LIVE",
+            event_name="Live WTA",
+            title="Cara wins",
+            yes_bid=0.40,
+            yes_ask=0.42,
+            last_price=0.41,
+            volume=10.0,
+            updated_ts=now,
+            status="open",
+            series_ticker="KXWTAMATCH",
+            occurrence_ts=now,
+        )
+        btc = MarketSnapshot(
+            ticker="KXBTC15M-NOW-00",
+            event_ticker="KXBTC15M-NOW",
+            event_name="BTC 15m",
+            title="Up",
+            yes_bid=0.48,
+            yes_ask=0.52,
+            last_price=0.50,
+            volume=20.0,
+            updated_ts=now,
+            status="active",
+            series_ticker="KXBTC15M",
+        )
+        self.client.list_markets.return_value = ([live_atp, upcoming, wta, btc], 7.0)
+        catalog = self.http.get("/api/catalog", params={"category": "atp"})
+        self.assertEqual(catalog.status_code, 200)
+        grouped = catalog.json()
+        self.assertEqual(grouped["category_id"], "atp")
+        self.assertFalse(grouped["live_enabled"])
+        events = [row["event_ticker"] for row in grouped["events"]]
+        self.assertEqual(events, ["KXATPMATCH-LIVE"])
+        self.assertTrue(any(row["id"] == "challenger" for row in grouped["categories"]))
+
+        all_books = self.http.get("/api/catalog")
+        names = {row["event_ticker"] for row in all_books.json()["events"]}
+        self.assertIn("KXATPMATCH-LIVE", names)
+        self.assertIn("KXWTAMATCH-LIVE", names)
+        self.assertIn("KXBTC15M-NOW", names)
+        self.assertNotIn("KXATPMATCH-NEXT", names)
+
+        started = self.http.post(
+            "/api/start",
+            json={
+                "starting_cash": 100,
+                "max_dollars_per_ticker": 25,
+                "daily_loss_limit": 40,
+                "sleep_s": 8,
+                "trade_style": "aggressive",
+                "category_id": "atp",
+                "target_event_ticker": "KXATPMATCH-LIVE",
+                "mode": "paper",
+            },
+        )
+        self.assertEqual(started.status_code, 200)
+        session = started.json()["session"]
+        self.assertEqual(session["trade_style"], "aggressive")
+        self.assertEqual(session["target_category_id"], "atp")
+        self.assertTrue(session["trade_tennis"])
+        self.assertFalse(session["trade_bitcoin"])
+        self.assertAlmostEqual(session["edge_threshold_cents"], 1.5)
+        self.assertAlmostEqual(session["gamma"], 0.10)
+        self.assertAlmostEqual(session["kappa"], 2.5)
+        self.assertEqual(session["base_contracts"], 4)
+        self.assertAlmostEqual(session["max_spread_cents"], 12.0)
+        self.assertFalse(session["live_enabled"])
+        self.assertEqual(session["target"]["event_ticker"], "KXATPMATCH-LIVE")
+        self.http.post("/api/stop")
+        deadline = time.time() + 4
+        while time.time() < deadline and self.http.get("/api/run").json()["running"]:
+            time.sleep(0.05)
+        status = self.http.get("/api/status").json()
+        self.assertEqual(status["trade_style"], "aggressive")
+        self.assertEqual(status["target_category_id"], "atp")
+        self.assertFalse(status["live_enabled"])
 
 
 if __name__ == "__main__":

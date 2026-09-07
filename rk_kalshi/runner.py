@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import time
 
+from rk_kalshi.catalog import filter_markets_by_category
 from rk_kalshi.client import KalshiPublicClient
 from rk_kalshi.config import AppConfig
 from rk_kalshi.execution import PaperExecution
@@ -44,6 +45,7 @@ class PaperRunner:
             "targeted": 0,
             "target_event_ticker": "",
             "target_market_ticker": "",
+            "target_category_id": "",
         }
 
     def close(self) -> None:
@@ -106,6 +108,13 @@ class PaperRunner:
             }
         else:
             markets, latency_ms = self.client.list_markets()
+            if (self.cfg.target_category_id or "").strip() and self.cfg.target_category_id.lower() != "all":
+                markets = filter_markets_by_category(
+                    markets,
+                    self.cfg.target_category_id,
+                    near_money_low=self.cfg.bitcoin_near_money_low,
+                    near_money_high=self.cfg.bitcoin_near_money_high,
+                )
             tennis = [m for m in markets if m.asset_class == "tennis"]
             bitcoin = select_bitcoin_tradeable(
                 markets,
@@ -138,6 +147,7 @@ class PaperRunner:
         self.last_scan["targeted"] = len(targeted)
         self.last_scan["target_event_ticker"] = self.cfg.target_event_ticker
         self.last_scan["target_market_ticker"] = self.cfg.target_market_ticker
+        self.last_scan["target_category_id"] = self.cfg.target_category_id
         marks = {m.ticker: m.yes_mid for m in tradeable if m.yes_mid is not None}
         if self.risk.kill_switch_hit(state, marks):
             state.killed = True

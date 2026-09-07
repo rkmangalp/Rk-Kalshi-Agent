@@ -9,6 +9,8 @@ kalshi:
     - KXATPMATCH
     - KXWTAMATCH
     - KXITFWMATCH
+    - KXITFMMATCH
+    - KXATPCHALLENGERMATCH
   bitcoin_series_tickers:
     - KXBTC15M
     - KXBTCD
@@ -54,8 +56,8 @@ signal:
   obi_tilt_cents: 2.0
   # Optional last-print / EMA fair when inventory and OBI are both idle.
   use_ema_fallback: false
-  # as_obi (default) | hybrid (AS filters, ChatGPT confirms) | llm
-  mode: as_obi
+  # as_obi | hybrid (AS filters, ChatGPT confirms; default for research) | llm
+  mode: hybrid
   llm_model: gpt-4o-mini
   llm_min_interval_s: 20
   llm_max_markets_per_call: 6

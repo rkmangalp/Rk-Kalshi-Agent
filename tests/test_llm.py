@@ -108,6 +108,10 @@ class LlmTraderTests(unittest.TestCase):
         self.assertEqual(kept[0].side, "buy")
         self.assertIn("ChatGPT gpt-4o-mini confirmed", kept[0].edge_thesis)
         self.assertIn("imbalance supports bid", kept[0].edge_thesis)
+        user = json.loads(fake.messages[1]["content"])
+        self.assertIn("anticipat", user["instruction"].lower())
+        self.assertIn("in_play", user["markets"][0])
+        self.assertIn("momentum", fake.messages[0]["content"].lower())
 
     def test_llm_mode_fee_gate_blocks_tiny_estimate(self):
         market = _market()
