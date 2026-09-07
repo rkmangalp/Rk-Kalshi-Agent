@@ -7,7 +7,13 @@ from typing import Any
 import yaml
 
 
-DEFAULT_SERIES = ("KXATPMATCH", "KXWTAMATCH", "KXITFWMATCH")
+DEFAULT_SERIES = (
+    "KXATPMATCH",
+    "KXWTAMATCH",
+    "KXITFWMATCH",
+    "KXITFMMATCH",
+    "KXATPCHALLENGERMATCH",
+)
 DEFAULT_BITCOIN_SERIES = ("KXBTC15M", "KXBTCD")
 DEFAULT_BASE_URL = "https://external-api.kalshi.com/trade-api/v2"
 
@@ -47,6 +53,8 @@ class AppConfig:
     obi_tilt_cents: float = 2.0
     use_ema_fallback: bool = False
     signal_mode: str = "as_obi"
+    trade_style: str = "active"
+    target_category_id: str = ""
     llm_model: str = "gpt-4o-mini"
     llm_min_interval_s: float = 20.0
     llm_max_markets_per_call: int = 6
@@ -146,6 +154,8 @@ def config_from_mapping(raw: dict[str, Any]) -> AppConfig:
         obi_tilt_cents=float(signal.get("obi_tilt_cents", 2.0)),
         use_ema_fallback=bool(signal.get("use_ema_fallback", False)),
         signal_mode=_signal_mode(signal.get("mode", signal.get("signal_mode", "as_obi"))),
+        trade_style=str(paper.get("trade_style") or signal.get("trade_style") or "active"),
+        target_category_id=str(kalshi.get("target_category_id") or ""),
         llm_model=str(signal.get("llm_model") or "gpt-4o-mini"),
         llm_min_interval_s=float(signal.get("llm_min_interval_s", 20.0)),
         llm_max_markets_per_call=max(1, int(signal.get("llm_max_markets_per_call", 6))),

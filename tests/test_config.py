@@ -23,8 +23,12 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(cfg.llm_model, "gpt-4o-mini")
         self.assertFalse(cfg.live_enabled)
         self.assertTrue(cfg.live_matches_only)
-        self.assertEqual(cfg.series_tickers, ("KXATPMATCH", "KXWTAMATCH", "KXITFWMATCH"))
+        self.assertEqual(
+            cfg.series_tickers,
+            ("KXATPMATCH", "KXWTAMATCH", "KXITFWMATCH", "KXITFMMATCH", "KXATPCHALLENGERMATCH"),
+        )
         self.assertEqual(cfg.bitcoin_series_tickers, ("KXBTC15M", "KXBTCD"))
+        self.assertEqual(cfg.trade_style, "active")
         self.assertTrue(cfg.trade_bitcoin)
         self.assertTrue(cfg.trade_tennis)
         self.assertIn("KXBTC15M", cfg.enabled_series_tickers())
@@ -46,7 +50,7 @@ class ConfigTests(unittest.TestCase):
         self.assertAlmostEqual(cfg.gamma, 0.25)
         self.assertAlmostEqual(cfg.kappa, 1.5)
         self.assertFalse(cfg.use_ema_fallback)
-        self.assertEqual(cfg.signal_mode, "as_obi")
+        self.assertEqual(cfg.signal_mode, "hybrid")
 
     def test_load_yaml_overrides(self):
         with tempfile.NamedTemporaryFile("w", suffix=".yaml", delete=False) as handle:

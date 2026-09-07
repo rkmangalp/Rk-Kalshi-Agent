@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta http-equiv="Cache-Control" content="no-store">
   <title>Rk Kalshi Paper Desk</title>
-  <link rel="stylesheet" href="/static/app.css?v=localenv1">
+  <link rel="stylesheet" href="/static/app.css?v=uxmodes1">
 </head>
 <body>
   <div class="banner paper-banner" role="status">
@@ -163,15 +163,14 @@
       <p class="eyebrow">Paper session</p>
       <h2>Start paper trading</h2>
       <p class="lede">
-        Paper signal: <strong>Avellaneda–Stoikov reservation price</strong>
-        plus <strong>order-book imbalance</strong>, after Kalshi fees and
-        spread. Set a paper bankroll, then Start. Paper-trades Kalshi
-        <strong>Bitcoin buy and sell</strong> (YES contracts) and optional
-        live tennis. Optionally lock to <strong>any pasted Kalshi
-        market or event</strong>. This is simulated cash — the UI cannot
-        place live Kalshi or exchange orders. <strong>Not financial advice</strong>
-        and not a match or price predictor. There is
-        <strong>no guaranteed profitable model</strong>.
+        Pick a <strong>category</strong>, then a <strong>live match or market</strong>
+        from Kalshi’s public books. Choose a trading mode (Safe → Aggressive),
+        set a paper bankroll, then Start. Paper signal:
+        <strong>Avellaneda–Stoikov reservation price</strong> plus
+        <strong>order-book imbalance</strong>, after Kalshi fees and spread.
+        This is simulated cash — the UI cannot place live Kalshi or exchange
+        orders. <strong>Not financial advice</strong> and not a match or price
+        predictor. There is <strong>no guaranteed profitable model</strong>.
         <code>can_size_up</code> stays locked. Stop ends polling.
         <strong>Clear</strong> wipes the local paper session (fills, P&amp;L,
         log, selected contract) — not a live Kalshi account.
@@ -184,61 +183,76 @@
       </label>
       <label>
         Max $ per trade
-        <input id="max-per-trade" name="max_dollars_per_ticker" type="number" min="0.01" max="10000" step="0.01" value="5">
+        <input id="max-per-trade" name="max_dollars_per_ticker" type="number" min="0.01" max="10000" step="0.01" value="10">
       </label>
       <label>
         Daily loss limit ($)
-        <input id="daily-loss" name="daily_loss_limit" type="number" min="0.01" max="100000" step="0.01" value="15">
+        <input id="daily-loss" name="daily_loss_limit" type="number" min="0.01" max="100000" step="0.01" value="20">
       </label>
       <label>
         Poll interval (s)
-        <input id="start-sleep" name="sleep_s" type="number" min="0" max="3600" step="0.5" value="15">
+        <input id="start-sleep" name="sleep_s" type="number" min="0" max="3600" step="0.5" value="12">
       </label>
-      <label class="inline live-toggle">
-        <input type="checkbox" id="trade-bitcoin" checked>
-        Bitcoin (buy and sell YES)
-      </label>
-      <label class="inline live-toggle">
-        <input type="checkbox" id="trade-tennis" checked>
-        Tennis
-      </label>
-      <label class="inline live-toggle">
-        <input type="checkbox" id="live-matches-only" checked>
-        Live tennis matches only (in-play)
+      <label>
+        Trading mode
+        <select id="trade-style">
+          <option value="safe">Safe — low risk, low reward</option>
+          <option value="conservative">Conservative — mid-low</option>
+          <option value="active" selected>Active — mid-high</option>
+          <option value="aggressive">Aggressive — high risk, high reward</option>
+        </select>
       </label>
       <label>
         Paper signal
         <select id="signal-mode">
-          <option value="as_obi" selected>Avellaneda–Stoikov + OBI (local)</option>
-          <option value="hybrid">Hybrid: AS filter + ChatGPT confirm</option>
+          <option value="as_obi">Avellaneda–Stoikov + OBI (local)</option>
+          <option value="hybrid" selected>Hybrid: AS filter + ChatGPT confirm</option>
           <option value="llm">ChatGPT research (slow)</option>
         </select>
       </label>
-      <p class="fine" id="signal-mode-hint">ChatGPT modes read OPENAI_API_KEY from a local .env only — never paste keys here. LLM research is not a guaranteed edge.</p>
+      <p class="fine" id="trade-style-hint">Balanced mid-high — 2 contracts, 3¢ edge, $10/trade, 8¢ max spread, faster polls.</p>
+      <p class="fine" id="signal-mode-hint">Hybrid/LLM read OPENAI_API_KEY from a local .env only — never paste keys here. ChatGPT is asked to anticipate score/momentum swings, not just restate odds. Research is not a guaranteed edge.</p>
+      <label class="inline live-toggle">
+        <input type="checkbox" id="live-matches-only" checked>
+        Live tennis matches only (in-play)
+      </label>
       <div class="contract-box" id="contract-box">
-        <p class="eyebrow">Contract / match</p>
-        <h3>Choose a contract to paper-trade</h3>
+        <p class="eyebrow">Category / live match</p>
+        <h3>Choose a live book to paper-trade</h3>
         <p class="fine">
-          If a contract is set, paper trading uses <strong>only that
-          event’s markets</strong> — not every open book. Paste
-          <strong>any Kalshi market or event URL</strong>, or pick a
-          listed event.
+          Category first, then a live match or market from Kalshi’s public API.
+          Leave the match blank to paper-trade every live book in that category.
         </p>
-        <label>
-          Open contracts
-          <select id="contract-select">
-            <option value="">All enabled books (no specific contract)</option>
-          </select>
-        </label>
+        <div class="catalog-row">
+          <label>
+            Category
+            <select id="category-select">
+              <option value="all">All live books</option>
+              <option value="atp">Tennis · ATP</option>
+              <option value="wta">Tennis · WTA</option>
+              <option value="challenger">Tennis · Challenger</option>
+              <option value="itf">Tennis · ITF</option>
+              <option value="btc15m">Bitcoin · 15 min</option>
+              <option value="btcd">Bitcoin · daily</option>
+            </select>
+          </label>
+          <label>
+            Live match / market
+            <select id="match-select">
+              <option value="">All live in this category</option>
+            </select>
+          </label>
+        </div>
+        <p class="fine" id="match-hint">Refreshing live markets from Kalshi…</p>
         <label class="contract-url">
-          Paste any Kalshi market or event URL
+          Optional: paste any Kalshi market or event URL
           <input id="contract-url" type="text" spellcheck="false" placeholder="https://kalshi.com/markets/kxatpchallengermatch/challenger-atp-/kxatpchallengermatch-26sep06kimtam">
         </label>
         <div class="contract-actions">
-          <button type="button" id="btn-use-contract">Use this contract</button>
+          <button type="button" id="btn-use-contract">Use pasted URL</button>
           <button type="button" id="btn-clear-contract">Clear selection</button>
         </div>
-        <p class="fine" id="contract-status" role="alert" aria-live="assertive">No contract selected — paper can scan the full enabled universe.</p>
+        <p class="fine" id="contract-status" role="alert" aria-live="assertive">No match selected — paper can scan every live book in the category.</p>
         <p class="fine examples">
           Examples:
           <code>https://kalshi.com/markets/kxatpmatch/atp-tennis-match/kxatpmatch-26sep06cerblo</code>
@@ -400,6 +414,6 @@
     <span id="footer-meta">localhost · paper_mode=true · live.enabled cannot be turned on from this UI</span>
   </footer>
 
-  <script src="/static/app.js?v=localenv1"></script>
+  <script src="/static/app.js?v=uxmodes1"></script>
 </body>
 </html>

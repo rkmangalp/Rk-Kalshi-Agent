@@ -347,6 +347,61 @@ class RunnerTests(unittest.TestCase):
         )
         self.assertEqual([m.ticker for m in market_only], [match.ticker])
 
+    def test_run_once_filters_to_selected_category(self):
+        from dataclasses import replace
+
+        atp = MarketSnapshot(
+            ticker="KXATPMATCH-LIVE-AAA",
+            event_ticker="KXATPMATCH-LIVE",
+            event_name="Live ATP",
+            title="Ada wins",
+            yes_bid=0.395,
+            yes_ask=0.405,
+            last_price=0.40,
+            volume=50.0,
+            updated_ts=time.time(),
+            status="active",
+            series_ticker="KXATPMATCH",
+            occurrence_ts=time.time(),
+            yes_bid_size=2000.0,
+            yes_ask_size=20.0,
+        )
+        wta = MarketSnapshot(
+            ticker="KXWTAMATCH-LIVE-AAA",
+            event_ticker="KXWTAMATCH-LIVE",
+            event_name="Live WTA",
+            title="Bea wins",
+            yes_bid=0.395,
+            yes_ask=0.405,
+            last_price=0.40,
+            volume=50.0,
+            updated_ts=time.time(),
+            status="active",
+            series_ticker="KXWTAMATCH",
+            occurrence_ts=time.time(),
+            yes_bid_size=2000.0,
+            yes_ask_size=20.0,
+        )
+        cfg = replace(
+            self.cfg,
+            target_category_id="atp",
+            trade_tennis=True,
+            trade_bitcoin=False,
+            live_matches_only=True,
+        )
+        seeded = new_state(cfg, day="2026-09-06")
+        seeded.ema[atp.ticker] = 0.60
+        seeded.ema[wta.ticker] = 0.60
+        save_state(cfg, seeded)
+        client = MagicMock()
+        client.list_markets.return_value = ([atp, wta], 9.0)
+        runner = PaperRunner(cfg, client=client)
+        fills = runner.run_once()
+        self.assertEqual(len(fills), 1)
+        self.assertEqual(fills[0].ticker, atp.ticker)
+        self.assertEqual(runner.last_scan["target_category_id"], "atp")
+        self.assertEqual(runner.last_scan["live"], 1)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -170,9 +170,13 @@ class LlmResearchTrader:
                 "role": "system",
                 "content": (
                     "You are a paper-trading research assistant for Kalshi-style binary "
-                    "prediction markets. Return JSON only. Never claim guaranteed profit. "
-                    "This is not financial advice. Prefer skip when the book is tight or "
-                    "the edge is unclear. Live order placement is disabled."
+                    "prediction markets (tennis matches and Bitcoin up/down). Return JSON "
+                    "only. Never claim guaranteed profit. This is not financial advice. "
+                    "Anticipate likely near-term score swings, momentum shifts, and how "
+                    "those would move YES vs NO mids — do not only restate the current "
+                    "odds. Prefer skip when the book is tight, the anticipated move is "
+                    "unclear, or fees eat the edge. Live order placement is disabled. "
+                    "Research is advisory and rate-limited."
                 ),
             },
             {"role": "user", "content": json.dumps(payload, separators=(",", ":"))},
@@ -349,9 +353,16 @@ def _prompt_payload(
     cfg: AppConfig,
 ) -> dict[str, Any]:
     as_by_ticker = {s.ticker: s for s in as_signals}
+    now = time.time()
     rows = []
     for market in markets:
         mid = market.yes_mid
+        start_in = None
+        if market.occurrence_ts is not None:
+            start_in = market.occurrence_ts - now
+        close_in = None
+        if market.close_ts is not None:
+            close_in = market.close_ts - now
         rows.append(
             {
                 "ticker": market.ticker,
@@ -366,6 +377,11 @@ def _prompt_payload(
                 "obi": market.order_book_imbalance,
                 "volume": market.volume,
                 "inventory_q": _inventory_q(market.ticker, inventory),
+                "in_play": market.is_in_play(now),
+                "occurrence_ts": market.occurrence_ts,
+                "close_ts": market.close_ts,
+                "seconds_to_start": start_in,
+                "seconds_to_close": close_in,
                 "as_side": as_by_ticker[market.ticker].side if market.ticker in as_by_ticker else None,
                 "as_edge_cents": (
                     as_by_ticker[market.ticker].edge_cents if market.ticker in as_by_ticker else None
@@ -380,7 +396,10 @@ def _prompt_payload(
         "instruction": (
             "Return JSON {\"decisions\":[{\"ticker\",\"action\":\"buy|sell|skip\","
             "\"edge_cents_estimate\",\"confidence\",\"thesis\"}]}. "
-            "action buy/sell means paper-trade YES. Use skip often."
+            "action buy/sell means paper-trade YES. Use skip often. "
+            "Anticipate likely tennis score/momentum swings (or short-horizon Bitcoin "
+            "drift) and map that to YES/NO mid moves; do not only summarize current odds. "
+            "Thesis must mention the anticipated path. Research is advisory only."
         ),
         "markets": rows,
     }
