@@ -280,6 +280,17 @@ class RunController:
         self._log("paper session cleared — local paper data only; live Kalshi account is unchanged")
         return self.snapshot()
 
+    def reset_view_only(self) -> dict[str, Any]:
+        with self._lock:
+            self.logs.clear()
+            self.last_error = None
+            self.fills_this_run = 0
+        self._log(
+            "local session view cleared — Kalshi orders were not cancelled; "
+            "paper journal is unchanged"
+        )
+        return self.snapshot()
+
     def _log(self, message: str) -> None:
         line = f"{local_now_iso()}  {message}"
         with self._lock:
@@ -608,13 +619,14 @@ class DashboardService:
         require_live_credentials(creds)
         return self.account.set_orders_enabled(True)
 
-    def disarm_live(self) -> dict[str, Any]:
-        live_exec = getattr(self.runner, "live", None)
-        if live_exec is not None:
-            try:
-                live_exec.cancel_open()
-            except Exception:
-                pass
+    def disarm_live(self, *, cancel_open: bool = False) -> dict[str, Any]:
+        if cancel_open:
+            live_exec = getattr(self.runner, "live", None)
+            if live_exec is not None:
+                try:
+                    live_exec.cancel_open(force=True)
+                except Exception:
+                    pass
         snapshot = self.account.set_orders_enabled(False)
         if self.cfg.live_enabled:
             cfg = replace(
@@ -689,6 +701,44 @@ class DashboardService:
             "run": run,
             "cleared": True,
             "note": "Cleared local paper session only — not a live Kalshi account.",
+        }
+
+    def clear_view(self) -> dict[str, Any]:
+        if self.controller.snapshot()["running"]:
+            raise HTTPException(
+                status_code=409,
+                detail="Stop before clearing the local session view",
+            )
+        run = self.controller.reset_view_only()
+        return {
+            "paper_mode": not self.cfg.live_enabled,
+            "live_enabled": bool(self.cfg.live_enabled),
+            "target": self.target_payload(),
+            "run": run,
+            "cleared": True,
+            "cleared_view_only": True,
+            "note": (
+                "Cleared local session view only — Kalshi orders were not cancelled "
+                "and the paper journal is unchanged. Use Cancel open Kalshi orders "
+                "if you intend to cancel-all resting orders from this desk."
+            ),
+        }
+
+    def cancel_open_live_orders(self) -> dict[str, Any]:
+        live_exec = getattr(self.runner, "live", None)
+        cancelled = 0
+        if live_exec is not None:
+            try:
+                cancelled = int(live_exec.cancel_open(force=True) or 0)
+            except Exception as exc:  # noqa: BLE001 — surface to the Live desk
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return {
+            "cancelled": cancelled,
+            "live_enabled": bool(self.cfg.live_enabled),
+            "note": (
+                f"Cancel open Kalshi orders: {cancelled} request(s) sent. "
+                "This control is explicit cancel — Clear view does not cancel-all."
+            ),
         }
 
 
@@ -921,11 +971,11 @@ def _mode_flags(service: DashboardService) -> dict[str, Any]:
     armed = bool(service.account.orders_enabled) and connected
     if live_on:
         banner = (
-            f"LIVE TRADING — real money · max ${service.cfg.max_dollars_per_ticker:g}/trade · "
+            f"LIVE DESK — REAL MONEY · max ${service.cfg.max_dollars_per_ticker:g}/trade · "
             f"daily kill ${service.cfg.daily_loss_limit:g}"
         )
     elif armed:
-        banner = "LIVE ARMED — next Start can spend real money; paper remains selectable"
+        banner = "LIVE ARMED — next Start can spend REAL MONEY; paper remains selectable"
     else:
         banner = "PAPER MODE ONLY — no live orders"
     return {
@@ -1173,7 +1223,7 @@ def create_app(
         live_exec = getattr(service.runner, "live", None)
         if live_exec is not None:
             try:
-                live_exec.cancel_open()
+                live_exec.cancel_open(force=True)
             except Exception:
                 pass
         return service.controller.stop()
@@ -1244,6 +1294,14 @@ def create_app(
     def clear_session() -> dict[str, Any]:
         return service.clear_session()
 
+    @app.post("/api/clear-view")
+    def clear_view() -> dict[str, Any]:
+        return service.clear_view()
+
+    @app.post("/api/live/cancel-open")
+    def cancel_open_live() -> dict[str, Any]:
+        return service.cancel_open_live_orders()
+
     @app.get("/api/account")
     def account_status() -> dict[str, Any]:
         return service.account.snapshot()
@@ -1268,7 +1326,7 @@ def create_app(
 
     @app.post("/api/account/disconnect")
     def account_disconnect() -> dict[str, Any]:
-        service.disarm_live()
+        service.disarm_live(cancel_open=True)
         return {
             "account": service.account.disconnect(),
             "paper_mode": True,

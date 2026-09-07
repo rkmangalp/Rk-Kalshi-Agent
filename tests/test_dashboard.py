@@ -154,6 +154,17 @@ class DashboardApiTests(unittest.TestCase):
         self.assertIn("account-banner", response.text)
         self.assertIn("Live account view", response.text)
         self.assertIn("paper desk", response.text.lower())
+        self.assertIn("desk-paper", response.text)
+        self.assertIn("desk-switch", response.text)
+        self.assertIn("btn-desk-paper", response.text)
+        self.assertIn("btn-desk-live", response.text)
+        self.assertIn("REAL MONEY", response.text)
+        self.assertIn("Clear view", response.text)
+        self.assertIn("not cancel-all", response.text)
+        self.assertIn("Cancel open Kalshi orders", response.text)
+        self.assertIn("btn-cancel-open", response.text)
+        self.assertIn("live-only", response.text)
+        self.assertIn("paper-only", response.text)
         self.assertNotIn("account-key-id", response.text)
         self.assertNotIn("account-key-pem", response.text)
         self.assertNotIn("Leave blank if using a file path.", response.text)
@@ -551,6 +562,36 @@ class DashboardApiTests(unittest.TestCase):
         self.assertAlmostEqual(state.cash, self.cfg.starting_cash)
         logs = wiped.json()["run"]["logs"]
         self.assertTrue(any("paper session cleared" in line for line in logs))
+
+    def test_clear_view_does_not_wipe_paper_or_cancel(self):
+        from rk_kalshi.state import load_state, new_state, save_state
+
+        FillJournal(self.cfg.fill_log_csv, self.cfg.fill_log_jsonl).append(_fill())
+        dirty = new_state(self.cfg, day="2026-09-06")
+        dirty.cash = 90.0
+        dirty.fill_count = 3
+        save_state(self.cfg, dirty)
+        self.assertEqual(self.http.get("/api/fills").json()["count"], 1)
+
+        viewed = self.http.post("/api/clear-view")
+        self.assertEqual(viewed.status_code, 200)
+        body = viewed.json()
+        self.assertTrue(body["cleared"])
+        self.assertTrue(body["cleared_view_only"])
+        self.assertIn("not cancelled", body["note"].lower())
+        self.assertIn("Cancel open Kalshi orders", body["note"])
+        self.assertEqual(self.http.get("/api/fills").json()["count"], 1)
+        state = load_state(self.cfg)
+        self.assertEqual(state.fill_count, 3)
+        self.assertAlmostEqual(state.cash, 90.0)
+        logs = body["run"]["logs"]
+        self.assertTrue(any("local session view cleared" in line for line in logs))
+        self.assertFalse(any("paper session cleared" in line for line in logs))
+
+        cancel = self.http.post("/api/live/cancel-open")
+        self.assertEqual(cancel.status_code, 200)
+        self.assertEqual(cancel.json()["cancelled"], 0)
+        self.assertIn("Clear view does not cancel-all", cancel.json()["note"])
 
     def test_account_connect_is_read_only_and_rejects_live_trading(self):
         from tests.test_account import FakeSignedClient, _pem, _rsa_key

@@ -5,30 +5,34 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta http-equiv="Cache-Control" content="no-store">
   <title>Rk Kalshi Paper Desk</title>
-  <link rel="stylesheet" href="/static/app.css?v=liveoptin1">
+  <link rel="stylesheet" href="/static/app.css?v=desk2">
 </head>
-<body>
+<body class="desk-paper">
   <div class="banner paper-banner" id="mode-banner" role="status">
     PAPER MODE ONLY — paper desk — no live orders
   </div>
-  <div class="banner account-banner is-disconnected" id="account-banner" role="status">
+  <div class="banner account-banner is-disconnected live-only" id="account-banner" role="status">
     KALSHI ACCOUNT DISCONNECTED — paper desk only
   </div>
 
   <header class="top">
     <div>
       <p class="eyebrow">Rk-Kalshi-Agent</p>
-      <h1>Paper desk</h1>
+      <h1 id="desk-title">Paper desk</h1>
       <p class="fine" id="signal-note">Avellaneda–Stoikov + order-book imbalance · paper only · not a predictor</p>
     </div>
     <div class="top-meta">
+      <div class="desk-switch" role="tablist" aria-label="Desk mode">
+        <button type="button" id="btn-desk-paper" data-desk="paper" class="is-on" role="tab" aria-selected="true">Paper</button>
+        <button type="button" id="btn-desk-live" data-desk="live" role="tab" aria-selected="false">Live</button>
+      </div>
       <span class="pill lock" id="account-pill">account disconnected</span>
       <span class="pill lock" id="size-pill">can_size_up locked</span>
       <span class="pill ok" id="kill-pill">kill-switch clear</span>
     </div>
   </header>
 
-  <section id="account-panel" class="account-panel" aria-label="Connect Kalshi account">
+  <section id="account-panel" class="account-panel live-only" aria-label="Connect Kalshi account">
     <div class="start-copy">
       <p class="eyebrow">Kalshi account</p>
       <h2>Connect to see live trades</h2>
@@ -49,6 +53,7 @@
         <span class="fine" id="account-hint">Set KALSHI_API_KEY_ID and KALSHI_PRIVATE_KEY_PATH in a local .env (never paste keys in the UI).</span>
       </div>
       <div class="live-arm" id="live-arm">
+        <p class="live-desk-stamp">LIVE DESK — REAL MONEY</p>
         <label class="inline">
           <input type="checkbox" id="enable-live-trading" disabled>
           Enable live trading (real money)
@@ -62,7 +67,9 @@
           max <strong>$5</strong> per trade by default (hard ceiling <strong>$10</strong>),
           daily loss kill-switch default <strong>$10</strong>.
           <code>can_size_up</code> stays locked. Never paste API keys in this UI or in chat.
-          Paper mode stays the default until both boxes are checked and you Start.
+          Paper mode stays the default until you switch to Live, Connect, and confirm.
+          Switch back to <strong>Paper</strong> to disarm. Clear on this desk is
+          <strong>Clear view</strong> (local session only — not cancel-all).
         </p>
       </div>
       <div class="account-actions">
@@ -72,11 +79,11 @@
     </form>
   </section>
 
-  <section class="panel live-trades" id="live-trades-panel" aria-label="Live Kalshi trades">
+  <section class="panel live-trades live-only" id="live-trades-panel" aria-label="Live Kalshi trades">
     <div class="panel-head">
       <h2>Live account view</h2>
       <div class="toolbar">
-        <span class="view-chip paper-chip" id="view-chip">Paper desk</span>
+        <span class="view-chip live-chip" id="view-chip">Live account</span>
         <label class="inline">
           <input type="checkbox" id="auto-account">
           Auto-refresh
@@ -87,7 +94,7 @@
     </div>
     <p class="fine" id="live-trades-note">
       This panel is your real Kalshi balance, positions, fills, and orders.
-      It is not the paper fill log below.
+      It is not the paper fill log. Paper journal stays on the Paper desk.
     </p>
     <section class="summary live-summary" id="account-cards" aria-label="Live account summary">
       <article class="card">
@@ -173,17 +180,17 @@
 
   <section id="start-panel" class="start-panel" aria-label="Start paper session">
     <div class="start-copy">
-      <p class="eyebrow">Paper session</p>
-      <h2>Start paper trading</h2>
-      <p class="lede">
+      <p class="eyebrow" id="start-eyebrow">Paper session</p>
+      <h2 id="start-heading">Start paper trading</h2>
+      <p class="lede" id="start-lede">
         Pick a <strong>category</strong>, then a <strong>live match or market</strong>
         from Kalshi’s public books. Choose a trading mode (Safe → Aggressive),
         set a paper bankroll, then Start. Paper signal:
         <strong>Avellaneda–Stoikov reservation price</strong> plus
         <strong>order-book imbalance</strong>, after Kalshi fees and spread.
-        Paper is the default (simulated cash). Live is opt-in after Connect
-        plus both confirmation boxes — then Start spends real money under
-        hard caps. Hybrid / ChatGPT research may inform signals;
+        Paper is the default (simulated cash). Switch the top <strong>Paper | Live</strong>
+        control to use the Live desk — that requires Connect plus explicit confirmation,
+        then Start spends real money under hard caps. Hybrid / ChatGPT research may inform signals;
         <strong>risk gates always win</strong>.
         <strong>Not financial advice</strong> and not a match or price
         predictor. There is <strong>no guaranteed profitable model</strong>.
@@ -194,7 +201,7 @@
     </div>
     <form id="start-form" class="start-form">
       <label>
-        Paper bankroll ($)
+        <span id="bankroll-label">Paper bankroll ($)</span>
         <input id="starting-cash" name="starting_cash" type="number" min="1" max="100000" step="1" value="100">
       </label>
       <label>
@@ -219,7 +226,7 @@
         </select>
       </label>
       <label>
-        Paper signal
+        <span id="signal-mode-label">Paper signal</span>
         <select id="signal-mode">
           <option value="as_obi">Avellaneda–Stoikov + OBI (local)</option>
           <option value="hybrid" selected>Hybrid: AS filter + ChatGPT confirm</option>
@@ -234,8 +241,8 @@
       </label>
       <div class="contract-box" id="contract-box">
         <p class="eyebrow">Category / live match</p>
-        <h3>Choose a live book to paper-trade</h3>
-        <p class="fine">
+        <h3 id="contract-heading">Choose a live book to paper-trade</h3>
+        <p class="fine" id="contract-copy">
           Category first, then a live match or market from Kalshi’s public API.
           Leave the match blank to paper-trade every live book in that category.
         </p>
@@ -282,13 +289,16 @@
         <button type="button" id="btn-start" class="primary start-btn">Start</button>
         <button type="button" id="btn-stop" class="stop-btn" hidden>Stop</button>
         <button type="button" id="btn-clear-session" class="clear-btn">Clear</button>
+        <button type="button" id="btn-cancel-open" class="cancel-open-btn live-only">Cancel open Kalshi orders</button>
+        <span class="muted" id="run-state">idle</span>
       </div>
-      <p class="fine" id="clear-hint">Clear resets this local paper book only. It does not cancel or touch live Kalshi orders.</p>
+      <p class="fine paper-only" id="clear-hint">Clear resets this local paper book only. It does not cancel or touch live Kalshi orders.</p>
+      <p class="fine live-only" id="clear-hint-live">Clear view wipes this screen’s log only — local session view, not cancel-all. Use <strong>Cancel open Kalshi orders</strong> if you intend to cancel resting Kalshi orders.</p>
       <p class="fine" id="start-hint">Defaults come from config.yaml and last Start (paper only).</p>
     </form>
   </section>
 
-  <section class="summary" id="summary-cards" aria-label="P&amp;L summary">
+  <section class="summary paper-only" id="summary-cards" aria-label="P&amp;L summary">
     <article class="card">
       <h2>Fills</h2>
       <p class="metric" id="metric-fills">0</p>
@@ -317,10 +327,10 @@
   </section>
 
   <section class="grid">
-    <article class="panel">
+    <article class="panel paper-only" id="paper-run-panel">
       <div class="panel-head">
         <h2>Paper-run controls</h2>
-        <span class="muted" id="run-state">idle</span>
+        <span class="muted">advanced · paper-only</span>
       </div>
       <form id="run-form" class="run-form">
         <label>
@@ -341,7 +351,7 @@
 
     <article class="panel log-panel">
       <div class="panel-head">
-        <h2>Live log</h2>
+        <h2 id="log-heading">Live log</h2>
         <div class="toolbar">
           <span class="muted" id="log-count">0 lines</span>
           <button type="button" id="btn-clear-logs">Clear logs</button>
@@ -397,7 +407,7 @@
     </div>
   </section>
 
-  <section class="panel">
+  <section class="panel paper-only" id="paper-fills-panel">
     <div class="panel-head">
       <h2>Paper fills</h2>
       <span class="muted" id="fills-meta">local clock · newest first</span>
@@ -430,6 +440,48 @@
     <span id="footer-meta">localhost · paper_mode=true · live.enabled=false</span>
   </footer>
 
-  <script src="/static/app.js?v=liveoptin1"></script>
+  <div id="desk-gate" class="desk-gate" hidden>
+    <div class="desk-gate-card" role="dialog" aria-modal="true" aria-labelledby="desk-gate-title">
+      <p class="eyebrow">Switch desk</p>
+      <h2 id="desk-gate-title">Enter LIVE desk — REAL MONEY</h2>
+      <p class="lede">
+        Live uses your connected Kalshi account. Start on this desk places real
+        orders under hard caps. Paper stays one click away and never shares this
+        chrome. Never paste API keys here.
+      </p>
+      <div id="desk-gate-connect">
+        <p class="fine">
+          Connect first. Credentials come from a local
+          <code>.env</code> (<code>KALSHI_API_KEY_ID</code>,
+          <code>KALSHI_PRIVATE_KEY_PATH</code>,
+          <code>KALSHI_ENVIRONMENT</code>) — never from this UI.
+        </p>
+        <button type="button" id="btn-gate-connect" class="primary">Connect</button>
+      </div>
+      <div id="desk-gate-confirm" hidden>
+        <p class="fine" id="desk-gate-balance">Connected. Confirm both boxes to enter the Live desk.</p>
+        <label class="inline">
+          <input type="checkbox" id="gate-enable-live">
+          Enable live trading (real money)
+        </label>
+        <label class="inline">
+          <input type="checkbox" id="gate-confirm-live">
+          I understand this spends real money on Kalshi
+        </label>
+        <p class="fine live-warning">
+          REAL MONEY. Hard caps: max <strong>$5</strong>/trade default
+          (ceiling <strong>$10</strong>), daily loss default <strong>$10</strong>
+          (ceiling <strong>$25</strong>). <code>can_size_up</code> stays locked.
+        </p>
+      </div>
+      <p class="fine error" id="desk-gate-error" hidden></p>
+      <div class="desk-gate-actions">
+        <button type="button" id="btn-gate-enter" class="primary live-start" disabled>Enter LIVE desk</button>
+        <button type="button" id="btn-gate-cancel">Stay on Paper</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="/static/app.js?v=desk2"></script>
 </body>
 </html>

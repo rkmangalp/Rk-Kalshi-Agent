@@ -74,8 +74,45 @@
     livePositionsBody: $("live-positions-body"),
     liveFillsBody: $("live-fills-body"),
     liveOrdersBody: $("live-orders-body"),
+    deskTitle: $("desk-title"),
+    btnDeskPaper: $("btn-desk-paper"),
+    btnDeskLive: $("btn-desk-live"),
+    startEyebrow: $("start-eyebrow"),
+    startHeading: $("start-heading"),
+    startLede: $("start-lede"),
+    bankrollLabel: $("bankroll-label"),
+    signalModeLabel: $("signal-mode-label"),
+    contractHeading: $("contract-heading"),
+    contractCopy: $("contract-copy"),
+    btnCancelOpen: $("btn-cancel-open"),
+    deskGate: $("desk-gate"),
+    deskGateConnect: $("desk-gate-connect"),
+    deskGateConfirm: $("desk-gate-confirm"),
+    deskGateBalance: $("desk-gate-balance"),
+    deskGateError: $("desk-gate-error"),
+    btnGateConnect: $("btn-gate-connect"),
+    btnGateEnter: $("btn-gate-enter"),
+    btnGateCancel: $("btn-gate-cancel"),
+    gateEnableLive: $("gate-enable-live"),
+    gateConfirmLive: $("gate-confirm-live"),
   };
 
+  const PAPER_LEDE = document.getElementById("start-lede")
+    ? document.getElementById("start-lede").innerHTML
+    : "";
+  const LIVE_LEDE =
+    "Same controls as Paper — category, live match, Safe · Conservative · Active · Aggressive, "
+    + "and as_obi / hybrid / llm research — but this desk spends <strong>real Kalshi cash</strong>. "
+    + "Bankroll is your connected balance; max $/trade and daily loss are hard-capped. "
+    + "Hybrid / ChatGPT may inform signals; <strong>risk gates always win</strong>. "
+    + "<strong>Not financial advice</strong>. There is <strong>no guaranteed profitable model</strong>. "
+    + "<code>can_size_up</code> stays locked. Stop ends polling and cancels open orders from this desk. "
+    + "<strong>Clear view</strong> wipes this screen’s log only — not cancel-all. "
+    + "Use <strong>Cancel open Kalshi orders</strong> if you intend to cancel resting orders.";
+
+  let deskMode = "paper";
+  let lastLiveBalance = null;
+  let lastLiveCaps = null;
   let running = false;
   let marketsTimer = null;
   let accountTimer = null;
@@ -167,7 +204,7 @@
     els.btnStart.disabled = !enabled;
     els.btnStart.hidden = !enabled;
     els.btnStop.hidden = enabled;
-    els.startingCash.disabled = !enabled;
+    els.startingCash.disabled = !enabled || deskMode === "live";
     els.maxPerTrade.disabled = !enabled;
     els.dailyLoss.disabled = !enabled;
     els.startSleep.disabled = !enabled;
@@ -194,7 +231,9 @@
 
   function renderLog(lines) {
     if (!lines || !lines.length) {
-      els.log.textContent = running ? "Paper-run started…" : "Waiting for a paper-run…";
+      els.log.textContent = running
+        ? (deskMode === "live" ? "LIVE session started…" : "Paper-run started…")
+        : (deskMode === "live" ? "Waiting for a LIVE session…" : "Waiting for a paper-run…");
       els.logCount.textContent = "0 lines";
       return;
     }
@@ -310,20 +349,16 @@
     const series = (status.series_tickers || []).join(", ");
     const account = status.account || {};
     const algo = status.signal_algorithm || "Avellaneda–Stoikov + OBI";
-    const liveOn = Boolean(status.live_enabled);
+    const liveOn = deskMode === "live";
+    if (status.live_caps) lastLiveCaps = status.live_caps;
     els.footer.textContent =
-      `localhost · paper_mode=${liveOn ? "false" : "true"} · live.enabled=${liveOn} · ${algo} · account=${account.status || "disconnected"} · btc=${status.trade_bitcoin} tennis=${status.trade_tennis} · live_matches_only=${status.live_matches_only} · series ${series} · edge ${status.edge_threshold_cents}¢`;
+      `localhost · desk=${deskMode} · paper_mode=${liveOn ? "false" : "true"} · live.enabled=${Boolean(status.live_enabled)} · ${algo} · account=${account.status || "disconnected"} · btc=${status.trade_bitcoin} tennis=${status.trade_tennis} · live_matches_only=${status.live_matches_only} · series ${series} · edge ${status.edge_threshold_cents}¢`;
     const signalNote = $("signal-note");
     if (signalNote && status.signal_algorithm) {
       signalNote.textContent = `${status.signal_algorithm} · ${liveOn ? "LIVE real money" : "paper only"} · not a predictor`;
     }
-    if (els.modeBanner) {
-      els.modeBanner.textContent = status.banner
-        || (liveOn ? "LIVE TRADING — real money" : "PAPER MODE ONLY — paper desk — no live orders");
-      els.modeBanner.className = liveOn ? "banner paper-banner is-live" : "banner paper-banner";
-    }
     renderAccountStatus(account, status.account_environment_default, status);
-    paintStartButton();
+    paintDeskChrome(status);
     if (!els.startForm.dataset.seeded) {
       if (status.starting_cash != null) els.startingCash.value = status.starting_cash;
       if (status.max_dollars_per_ticker != null) els.maxPerTrade.value = status.max_dollars_per_ticker;
@@ -355,7 +390,10 @@
         : categoryBookLabel(status),
     ].filter(Boolean).join(" · ") || "no books selected";
     els.startHint.textContent = running
-      ? `${liveOn ? "LIVE" : "Paper"} session running (${books} · ${status.trade_style || "active"}) — Stop ends polling. Clear wipes the local paper session, not a live Kalshi account.`
+      ? `${liveOn ? "LIVE" : "Paper"} session running (${books} · ${status.trade_style || "active"}) — Stop ends polling.`
+        + (liveOn
+          ? " Clear view is local-only and does not cancel Kalshi orders."
+          : " Clear wipes the local paper session, not a live Kalshi account.")
       : `Mode ${status.trade_style || "active"} · ${liveOn ? "LIVE real money" : "paper"} · max $${fmt(status.max_dollars_per_ticker, 0)}/trade · daily loss $${fmt(status.daily_loss_limit, 0)} · ${books}`;
   }
 
@@ -403,15 +441,15 @@
     const categoryLabel = selectedCategoryLabel();
     if (!lastTarget.active) {
       els.contractStatus.textContent =
-        `No match selected — paper can scan every live book in ${categoryLabel}.`;
+        `No match selected — ${deskMode === "live" ? "LIVE" : "paper"} can scan every live book in ${categoryLabel}.`;
     } else if (lastTarget.market_ticker) {
       const kind = lastTarget.asset_class || "Kalshi";
       els.contractStatus.textContent =
-        `Selected ${kind} contract ${lastTarget.market_ticker} on ${lastTarget.event_ticker}. Paper trading will use only this market.`;
+        `Selected ${kind} contract ${lastTarget.market_ticker} on ${lastTarget.event_ticker}. ${deskMode === "live" ? "LIVE" : "Paper"} trading will use only this market.`;
     } else {
       const kind = lastTarget.asset_class || "Kalshi";
       els.contractStatus.textContent =
-        `Selected ${kind} event ${lastTarget.label || lastTarget.event_ticker}. Paper trading will use only this event’s contracts.`;
+        `Selected ${kind} event ${lastTarget.label || lastTarget.event_ticker}. ${deskMode === "live" ? "LIVE" : "Paper"} trading will use only this event’s contracts.`;
     }
   }
 
@@ -539,16 +577,65 @@
   }
 
   function liveIntent() {
-    return Boolean(
-      els.enableLiveTrading && els.enableLiveTrading.checked
-      && els.confirmLiveMoney && els.confirmLiveMoney.checked
-    );
+    return deskMode === "live";
   }
 
   function paintStartButton() {
     if (!els.btnStart) return;
     els.btnStart.textContent = liveIntent() ? "Start LIVE (real money)" : "Start";
     els.btnStart.classList.toggle("live-start", liveIntent());
+    if (els.btnClearSession) {
+      els.btnClearSession.textContent = liveIntent() ? "Clear view" : "Clear";
+    }
+  }
+
+  function paintDeskChrome(status) {
+    const liveOn = deskMode === "live";
+    document.body.classList.toggle("desk-paper", !liveOn);
+    document.body.classList.toggle("desk-live", liveOn);
+    document.title = liveOn ? "Rk Kalshi LIVE Desk" : "Rk Kalshi Paper Desk";
+    if (els.btnDeskPaper) {
+      els.btnDeskPaper.classList.toggle("is-on", !liveOn);
+      els.btnDeskPaper.setAttribute("aria-selected", liveOn ? "false" : "true");
+    }
+    if (els.btnDeskLive) {
+      els.btnDeskLive.classList.toggle("is-on", liveOn);
+      els.btnDeskLive.setAttribute("aria-selected", liveOn ? "true" : "false");
+    }
+    if (els.deskTitle) els.deskTitle.textContent = liveOn ? "LIVE desk — real money" : "Paper desk";
+    if (els.modeBanner) {
+      els.modeBanner.textContent = liveOn
+        ? "LIVE DESK — REAL MONEY — Kalshi orders spend real cash"
+        : "PAPER MODE ONLY — paper desk — no live orders";
+      els.modeBanner.className = liveOn ? "banner paper-banner is-live" : "banner paper-banner";
+    }
+    if (els.startEyebrow) els.startEyebrow.textContent = liveOn ? "Live session" : "Paper session";
+    if (els.startHeading) els.startHeading.textContent = liveOn ? "Start LIVE trading" : "Start paper trading";
+    if (els.startLede) els.startLede.innerHTML = liveOn ? LIVE_LEDE : PAPER_LEDE;
+    if (els.bankrollLabel) {
+      els.bankrollLabel.textContent = liveOn ? "Kalshi cash (live bankroll)" : "Paper bankroll ($)";
+    }
+    if (els.signalModeLabel) {
+      els.signalModeLabel.textContent = liveOn ? "Signal / research" : "Paper signal";
+    }
+    if (els.contractHeading) {
+      els.contractHeading.textContent = liveOn
+        ? "Choose a live book to trade with real money"
+        : "Choose a live book to paper-trade";
+    }
+    if (els.contractCopy) {
+      els.contractCopy.textContent = liveOn
+        ? "Category first, then a live match or market from Kalshi’s public API. Leave the match blank to trade every live book in that category. Caps still apply."
+        : "Category first, then a live match or market from Kalshi’s public API. Leave the match blank to paper-trade every live book in that category.";
+    }
+    if (els.startPanel) els.startPanel.setAttribute("aria-label", liveOn ? "Start live session" : "Start paper session");
+    if (liveOn && lastLiveCaps) clampLiveInputs(lastLiveCaps);
+    if (liveOn && lastLiveBalance != null && els.startingCash && !running) {
+      els.startingCash.value = lastLiveBalance;
+    }
+    paintStartButton();
+    paintContractStatus();
+    if (status && status.live_caps && liveOn) clampLiveInputs(status.live_caps);
   }
 
   function clampLiveInputs(caps) {
@@ -598,7 +685,9 @@
       if (account.message) {
         els.accountHint.textContent = account.message;
       } else if (status === "connected") {
-        els.accountHint.textContent = `Connected${suffix}. Enable Live only if you intend to spend real money.`;
+        els.accountHint.textContent = deskMode === "live"
+          ? `Connected${suffix}. You are on the LIVE desk. Switch to Paper to disarm.`
+          : `Connected${suffix}. Switch to Live only if you intend to spend real money.`;
       } else {
         els.accountHint.textContent =
           "Set KALSHI_API_KEY_ID and KALSHI_PRIVATE_KEY_PATH in a local .env (never paste keys in the UI).";
@@ -647,7 +736,11 @@
         ? `${env || "prod"} · ${payload.counts.positions} pos · ${payload.counts.fills} fills · ${payload.counts.orders} orders · ${fmt(payload.latency_ms, 1)} ms`
         : (payload.account && payload.account.message) || "not connected";
     }
+    if (payload.balance != null) lastLiveBalance = Number(payload.balance);
     if (els.liveBalance) els.liveBalance.textContent = payload.balance == null ? "—" : `$${fmt(payload.balance, 2)}`;
+    if (deskMode === "live" && lastLiveBalance != null && els.startingCash) {
+      els.startingCash.value = lastLiveBalance;
+    }
     if (els.livePortfolio) els.livePortfolio.textContent = payload.portfolio_value == null ? "—" : `$${fmt(payload.portfolio_value, 2)}`;
     if (els.livePositions) els.livePositions.textContent = String((payload.counts && payload.counts.positions) || 0);
     if (els.liveFills) els.liveFills.textContent = String((payload.counts && payload.counts.fills) || 0);
@@ -743,7 +836,12 @@
       });
       renderAccountStatus(payload.account || {});
       await refreshPortfolio();
+      updateGateFromAccount(payload.account || {});
     } catch (err) {
+      if (els.deskGateError) {
+        els.deskGateError.hidden = false;
+        els.deskGateError.textContent = err.message;
+      }
       renderAccountStatus({
         status: "error",
         banner: "KALSHI ACCOUNT ERROR — paper desk is unchanged; live orders stay disabled",
@@ -761,9 +859,10 @@
     try {
       const payload = await fetchJSON("/api/account/disconnect", { method: "POST" });
       renderAccountStatus(payload.account || { status: "disconnected" });
-      if (els.enableLiveTrading) els.enableLiveTrading.checked = false;
-      if (els.confirmLiveMoney) els.confirmLiveMoney.checked = false;
-      paintStartButton();
+      lastLiveBalance = null;
+      if (deskMode === "live") {
+        await leaveLiveDesk({ fromDisconnect: true });
+      }
       emptyLiveTables("Connect to load live positions.");
       if (els.accountMeta) els.accountMeta.textContent = "disconnected";
     } catch (err) {
@@ -929,15 +1028,29 @@
     if (els.btnClearSession) els.btnClearSession.disabled = true;
     contractError = "";
     try {
-      const payload = await fetchJSON("/api/clear", { method: "POST" });
-      if (els.contractUrl) els.contractUrl.value = "";
+      const url = deskMode === "live" ? "/api/clear-view" : "/api/clear";
+      const payload = await fetchJSON(url, { method: "POST" });
+      if (deskMode !== "live" && els.contractUrl) els.contractUrl.value = "";
       if (payload.run) renderRun(payload.run);
-      renderTarget(payload.target || {});
+      if (payload.target) renderTarget(payload.target);
       await refreshStatusBundle();
     } catch (err) {
       els.log.textContent = `error: ${err.message}`;
     } finally {
       if (els.btnClearSession) els.btnClearSession.disabled = false;
+    }
+  }
+
+  async function cancelOpenOrders() {
+    if (els.btnCancelOpen) els.btnCancelOpen.disabled = true;
+    try {
+      const payload = await fetchJSON("/api/live/cancel-open", { method: "POST" });
+      els.log.textContent = payload.note || "Cancel open Kalshi orders requested.";
+      await refreshPortfolio();
+    } catch (err) {
+      els.log.textContent = `error: ${err.message}`;
+    } finally {
+      if (els.btnCancelOpen) els.btnCancelOpen.disabled = false;
     }
   }
 
@@ -995,44 +1108,209 @@
     });
   }
   async function syncLiveArm() {
-    paintStartButton();
-    const want = liveIntent();
-    if (els.confirmLiveMoney) {
-      els.confirmLiveMoney.disabled = !(els.enableLiveTrading && els.enableLiveTrading.checked) || running;
-      if (!(els.enableLiveTrading && els.enableLiveTrading.checked)) {
-        els.confirmLiveMoney.checked = false;
-      }
+    if (deskMode !== "live") return;
+    const stillLive = Boolean(
+      els.enableLiveTrading && els.enableLiveTrading.checked
+      && els.confirmLiveMoney && els.confirmLiveMoney.checked
+    );
+    if (!stillLive) await leaveLiveDesk();
+  }
+
+  function showGateError(message) {
+    if (!els.deskGateError) return;
+    if (!message) {
+      els.deskGateError.hidden = true;
+      els.deskGateError.textContent = "";
+      return;
     }
+    els.deskGateError.hidden = false;
+    els.deskGateError.textContent = message;
+  }
+
+  function gateConfirmed() {
+    return Boolean(
+      els.gateEnableLive && els.gateEnableLive.checked
+      && els.gateConfirmLive && els.gateConfirmLive.checked
+    );
+  }
+
+  function paintGateEnter() {
+    if (!els.btnGateEnter) return;
+    const connected = els.deskGateConfirm && !els.deskGateConfirm.hidden;
+    els.btnGateEnter.disabled = !(connected && gateConfirmed());
+  }
+
+  function updateGateFromAccount(account) {
+    const connected = account && account.status === "connected";
+    if (els.deskGateConnect) els.deskGateConnect.hidden = Boolean(connected);
+    if (els.deskGateConfirm) els.deskGateConfirm.hidden = !connected;
+    if (connected && els.deskGateBalance) {
+      const env = account.environment || "";
+      const suffix = account.api_key_id_suffix ? ` key ${account.api_key_id_suffix}` : "";
+      const cash = lastLiveBalance != null ? ` · cash $${fmt(lastLiveBalance, 2)}` : "";
+      els.deskGateBalance.textContent =
+        `Connected${suffix}${env ? ` · ${env}` : ""}${cash}. Confirm both boxes to enter the Live desk.`;
+    }
+    paintGateEnter();
+  }
+
+  function openLiveGate() {
+    if (!els.deskGate) return;
+    showGateError("");
+    if (els.gateEnableLive) els.gateEnableLive.checked = false;
+    if (els.gateConfirmLive) els.gateConfirmLive.checked = false;
+    els.deskGate.hidden = false;
+    fetchJSON("/api/account").then((account) => {
+      updateGateFromAccount(account);
+    }).catch((err) => {
+      updateGateFromAccount({ status: "disconnected" });
+      showGateError(err.message);
+    });
+    paintGateEnter();
+  }
+
+  function closeLiveGate() {
+    if (els.deskGate) els.deskGate.hidden = true;
+    showGateError("");
+  }
+
+  async function enterLiveDesk(opts) {
+    const skipConfirm = Boolean(opts && opts.skipConfirm);
     try {
-      const payload = await fetchJSON("/api/live", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          enabled: want,
-          confirm_live: want,
-          understand_real_money: want,
-        }),
-      });
-      if (payload.account) renderAccountStatus(payload.account, null, payload);
-      if (payload.live_caps && want) clampLiveInputs(payload.live_caps);
-      if (els.modeBanner && payload.banner) {
-        els.modeBanner.textContent = payload.banner;
-        els.modeBanner.className = payload.live_enabled || payload.live_armed
-          ? "banner paper-banner is-live"
-          : "banner paper-banner";
+      if (!skipConfirm) {
+        if (!gateConfirmed()) {
+          showGateError("Check both confirmation boxes to enter the Live desk.");
+          return;
+        }
+        const payload = await fetchJSON("/api/live", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            enabled: true,
+            confirm_live: true,
+            understand_real_money: true,
+          }),
+        });
+        if (payload.live_caps) lastLiveCaps = payload.live_caps;
+        if (payload.account) renderAccountStatus(payload.account, null, payload);
       }
+      deskMode = "live";
+      if (els.enableLiveTrading) els.enableLiveTrading.checked = true;
+      if (els.confirmLiveMoney) els.confirmLiveMoney.checked = true;
+      closeLiveGate();
+      paintDeskChrome();
+      await refreshPortfolio().catch(() => {});
+      await refreshStatusBundle().catch(() => {});
     } catch (err) {
-      if (els.enableLiveTrading) els.enableLiveTrading.checked = false;
-      if (els.confirmLiveMoney) els.confirmLiveMoney.checked = false;
-      if (els.accountHint) els.accountHint.textContent = err.message;
-      paintStartButton();
+      showGateError(err.message);
+      deskMode = "paper";
+      paintDeskChrome();
     }
   }
+
+  async function leaveLiveDesk(opts) {
+    const fromDisconnect = Boolean(opts && opts.fromDisconnect);
+    try {
+      if (running && !fromDisconnect) {
+        els.log.textContent = "Stop the LIVE session before switching to Paper.";
+        paintDeskChrome();
+        return;
+      }
+      if (!fromDisconnect) {
+        await fetchJSON("/api/live", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ enabled: false }),
+        });
+      }
+    } catch (err) {
+      els.log.textContent = `error: ${err.message}`;
+    }
+    deskMode = "paper";
+    if (els.enableLiveTrading) els.enableLiveTrading.checked = false;
+    if (els.confirmLiveMoney) els.confirmLiveMoney.checked = false;
+    if (els.gateEnableLive) els.gateEnableLive.checked = false;
+    if (els.gateConfirmLive) els.gateConfirmLive.checked = false;
+    paintDeskChrome();
+    await refreshStatusBundle().catch(() => {});
+  }
+
+  function requestLiveDesk() {
+    if (deskMode === "live") {
+      paintDeskChrome();
+      return;
+    }
+    if (running) {
+      els.log.textContent = "Stop the paper session before switching to Live.";
+      paintDeskChrome();
+      return;
+    }
+    openLiveGate();
+    paintDeskChrome();
+  }
+
+  async function bootDesk() {
+    paintDeskChrome();
+    try {
+      const status = await fetchJSON("/api/status");
+      const liveRunning = Boolean(status.run && status.run.running && status.live_enabled);
+      if (liveRunning) {
+        deskMode = "live";
+        if (els.enableLiveTrading) els.enableLiveTrading.checked = true;
+        if (els.confirmLiveMoney) els.confirmLiveMoney.checked = true;
+        if (status.live_caps) lastLiveCaps = status.live_caps;
+        paintDeskChrome(status);
+        return;
+      }
+      if (status.live_armed || status.live_enabled) {
+        await fetchJSON("/api/live", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ enabled: false }),
+        });
+      }
+      deskMode = "paper";
+      paintDeskChrome(status);
+    } catch (err) {
+      deskMode = "paper";
+      paintDeskChrome();
+      els.log.textContent = `error: ${err.message}`;
+    }
+  }
+
   if (els.enableLiveTrading) {
     els.enableLiveTrading.addEventListener("change", () => { syncLiveArm(); });
   }
   if (els.confirmLiveMoney) {
     els.confirmLiveMoney.addEventListener("change", () => { syncLiveArm(); });
+  }
+  if (els.btnDeskPaper) {
+    els.btnDeskPaper.addEventListener("click", () => { leaveLiveDesk(); });
+  }
+  if (els.btnDeskLive) {
+    els.btnDeskLive.addEventListener("click", () => { requestLiveDesk(); });
+  }
+  if (els.btnGateCancel) {
+    els.btnGateCancel.addEventListener("click", () => {
+      closeLiveGate();
+      deskMode = "paper";
+      paintDeskChrome();
+    });
+  }
+  if (els.btnGateConnect) {
+    els.btnGateConnect.addEventListener("click", () => { connectAccount(); });
+  }
+  if (els.btnGateEnter) {
+    els.btnGateEnter.addEventListener("click", () => { enterLiveDesk(); });
+  }
+  if (els.gateEnableLive) {
+    els.gateEnableLive.addEventListener("change", () => { paintGateEnter(); });
+  }
+  if (els.gateConfirmLive) {
+    els.gateConfirmLive.addEventListener("change", () => { paintGateEnter(); });
+  }
+  if (els.btnCancelOpen) {
+    els.btnCancelOpen.addEventListener("click", () => { cancelOpenOrders(); });
   }
   if (els.btnClearLogs) {
     els.btnClearLogs.addEventListener("click", () => clearLogs());
@@ -1088,7 +1366,7 @@
     stylePresets = payload || stylePresets;
     paintTradeStyleHint();
   }).catch(() => {});
-  refreshStatusBundle().catch((err) => {
+  bootDesk().then(() => refreshStatusBundle()).catch((err) => {
     els.log.textContent = `error: ${err.message}`;
   });
   refreshMarkets();

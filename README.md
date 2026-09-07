@@ -126,10 +126,10 @@ Then `python -m rk_kalshi dashboard` → pick category + live match → leave
 momentum swings and how those map to YES/NO mids. It is slow versus the
 book, costs tokens, and is **not** a guaranteed edge.
 
-To place **one real order path** on that same match: Connect first, check
-**Enable live trading** and **I understand this spends real money**, then
-Start. Caps apply ($5 default / $10 hard ceiling per trade). Uncheck Live
-to return to paper. Never paste keys in the UI or in chat.
+To place **one real order path** on that same match: switch the dashboard
+**Paper | Live** control to **Live**, Connect, confirm both real-money boxes,
+then Start. Caps apply ($5 default / $10 hard ceiling per trade). Switch
+back to **Paper** to disarm. Never paste keys in the UI or in chat.
 
 Example Kalshi URLs:
 
@@ -144,9 +144,12 @@ works. Series pages (`/markets/kxatpmatch`) and non-Kalshi links are
 rejected with a red error on the contract box.
 
 **Stop** ends polling and leaves the paper book on screen so you can read
-it. **Clear** (shown after Stop / while idle) archives then wipes the
-*local* paper session: fills journal, bankroll state, P&L, live log, and
-the selected contract. It does **not** touch a live Kalshi account.
+it. **Clear** on the Paper desk archives then wipes the *local* paper
+session: fills journal, bankroll state, P&L, live log, and the selected
+contract. It does **not** touch a live Kalshi account. On the Live desk,
+**Clear view** wipes the on-screen log only (not cancel-all). Use the
+explicit **Cancel open Kalshi orders** control if you intend to cancel
+resting Kalshi orders.
 Upcoming books are shown but not paper-traded while “Live matches only”
 is on (unless a specific match is selected). Live order placement is
 **opt-in** (Connect + confirmation). `can_size_up` stays locked.
@@ -319,15 +322,22 @@ Written to `data/fills.csv` and `data/fills.jsonl`. Field names are locked in
 
 ## Live trading (opt-in, hard caps)
 
-Paper stays the default and stays selectable. Live must be armed in the
-dashboard:
+Paper stays the default and stays selectable. Live is a separate desk
+(not a merged screen):
 
 1. Set `KALSHI_API_KEY_ID`, `KALSHI_PRIVATE_KEY_PATH`, and
    `KALSHI_ENVIRONMENT` (`demo` or `prod`) in a **local `.env`**. Never paste
    keys in the UI or in chat.
-2. **Connect**. Confirm the Live account panel shows your real balance.
-3. Check **Enable live trading** and **I understand this spends real money**.
+2. Switch **Paper | Live** to **Live**. Connect is required, then both
+   confirmation boxes (**Enable live trading** and **I understand this spends
+   real money**).
+3. Confirm the Live account panel shows your real balance (REAL MONEY banner).
 4. Pick one category + match (Active + Hybrid is fine). Start.
+
+Both desks share the same controls (category → match, Safe · Conservative ·
+Active · Aggressive, as_obi / hybrid / llm, Start / Stop / Clear, bankroll /
+max $/trade / daily loss). Paper uses the paper journal and simulated cash.
+Live uses the connected Kalshi balance, hard caps, and Live account view.
 
 Live posts Kalshi **Create Order V2**:
 `POST /trade-api/v2/portfolio/events/orders` with RSA-PSS headers already
@@ -351,8 +361,8 @@ kill-switch hits a resting remainder.
 Live fills and orders appear in **Live account view** (Kalshi). The paper
 fill CSV/JSONL is not used for live fills.
 
-**Losses are real.** Uncheck Live (or Disconnect) to return to paper. CLI
-`paper-run` never posts live orders.
+**Losses are real.** Switch back to **Paper** (or Disconnect) to leave the
+Live desk. CLI `paper-run` never posts live orders.
 
 ## Tests
 

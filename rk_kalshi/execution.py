@@ -177,15 +177,22 @@ class LiveKalshiExecution:
         payload, _latency = self._submit_order(signal, state, contracts)
         return payload
 
-    def cancel_open(self) -> None:
-        client = self._require_client()
+    def cancel_open(self, *, force: bool = False) -> int:
+        client = self.client
+        if not force:
+            client = self._require_client()
+        elif client is None:
+            return 0
         leftover = []
+        cancelled = 0
         for order_id in list(self.open_order_ids):
             try:
                 client.cancel_order(order_id)
+                cancelled += 1
             except AccountApiError:
                 leftover.append(order_id)
         self.open_order_ids = leftover
+        return cancelled
 
     def _submit_order(
         self,
