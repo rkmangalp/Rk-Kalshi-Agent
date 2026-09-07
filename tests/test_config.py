@@ -47,10 +47,12 @@ class ConfigTests(unittest.TestCase):
         self.assertGreater(cfg.starting_cash, 0)
         self.assertTrue(cfg.trade_bitcoin)
         self.assertEqual(cfg.bitcoin_series_tickers, ("KXBTC15M", "KXBTCD"))
-        self.assertAlmostEqual(cfg.gamma, 0.25)
-        self.assertAlmostEqual(cfg.kappa, 1.5)
+        self.assertAlmostEqual(cfg.gamma, 0.20)
+        self.assertAlmostEqual(cfg.kappa, 1.75)
         self.assertFalse(cfg.use_ema_fallback)
         self.assertEqual(cfg.signal_mode, "hybrid")
+        self.assertEqual(cfg.trade_style, "active")
+        self.assertEqual(cfg.base_contracts, 2)
 
     def test_load_yaml_overrides(self):
         with tempfile.NamedTemporaryFile("w", suffix=".yaml", delete=False) as handle:

@@ -178,9 +178,13 @@ class LlmResearchTrader:
                     "only. Never claim guaranteed profit. This is not financial advice. "
                     "Anticipate likely near-term score swings, momentum shifts, and how "
                     "those would move YES vs NO mids — do not only restate the current "
-                    "odds. Prefer skip when the book is tight, the anticipated move is "
-                    "unclear, or fees eat the edge. Live order placement is disabled. "
-                    "Research is advisory and rate-limited."
+                    "odds. For in-play tennis: hold vs break, swing after a game or set, "
+                    "and whether the YES mid should reprice up or down. For upcoming "
+                    "matches: the likely opening swing after the first games. For Bitcoin "
+                    "15m: short-horizon continuation vs mean-reversion of YES, not a BTC "
+                    "price forecast. Prefer skip when the book is tight, the anticipated "
+                    "move is unclear, or fees eat the edge. Live order placement is "
+                    "disabled. Research is advisory and rate-limited."
                 ),
             },
             {"role": "user", "content": json.dumps(payload, separators=(",", ":"))},

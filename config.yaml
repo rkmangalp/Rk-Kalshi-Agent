@@ -27,9 +27,10 @@ bankroll:
   starting_cash: 1000.0
 
 risk:
+  # Active paper mode default (Start panel can switch Safe→Aggressive).
   # Max dollars of exposure per market ticker (not per-contract price).
-  max_dollars_per_ticker: 200.0
-  daily_loss_limit: 500.0
+  max_dollars_per_ticker: 10.0
+  daily_loss_limit: 20.0
   # Martingale is forbidden in code even if this is flipped.
   allow_martingale: false
 
@@ -38,7 +39,7 @@ sizing:
   # fill_count >= min_fills_before_size_up AND running paper P&L > 0.
   allow_size_up: false
   min_fills_before_size_up: 200
-  base_contracts: 1
+  base_contracts: 2
 
 signal:
   # Net edge after half-spread + Kalshi quadratic fee, on a 0–100¢ scale.
@@ -47,12 +48,13 @@ signal:
   fee_multiplier: 1.0
   # Avellaneda–Stoikov reservation: r = mid - q * gamma * sigma^2 * T_frac.
   # There is no guaranteed profitable model; these knobs only change skew.
-  gamma: 0.25
+  # Active-mode AS knobs (see Start panel trading modes).
+  gamma: 0.20
   sigma_floor: 0.04
   sigma_window: 32
   t_frac_horizon_seconds: 14400
   # Order-book imbalance weight (alias: obi_weight). tilt = kappa * OBI * spread.
-  kappa: 1.5
+  kappa: 1.75
   obi_tilt_cents: 2.0
   # Optional last-print / EMA fair when inventory and OBI are both idle.
   use_ema_fallback: false
@@ -77,8 +79,10 @@ paper:
   fill_log_csv: data/fills.csv
   fill_log_jsonl: data/fills.jsonl
   state_path: data/paper_state.json
-  cycle_sleep_s: 50.0
+  # Active mode poll (Start panel can change this).
+  cycle_sleep_s: 12.0
   max_signals_per_cycle: 8
+  trade_style: active
 
 account:
   # Read-only portfolio view. Credentials come from env / .env /
