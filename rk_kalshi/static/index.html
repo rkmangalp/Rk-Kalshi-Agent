@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta http-equiv="Cache-Control" content="no-store">
   <title>Rk Kalshi Paper Desk</title>
-  <link rel="stylesheet" href="/static/app.css?v=account2">
+  <link rel="stylesheet" href="/static/app.css?v=account3">
 </head>
 <body>
   <div class="banner paper-banner" role="status">
@@ -32,36 +32,17 @@
       <p class="eyebrow">Kalshi account</p>
       <h2>Connect to see live trades</h2>
       <p class="lede">
-        Read-only: API Key ID + RSA private key. Connecting
-        <strong>does not</strong> enable live order placement.
-        Paper desk stays simulated. Keys stay in a local gitignored
-        store or <code>.env</code> — never commit them.
+        Read-only live account view. Connect uses
+        <code>KALSHI_API_KEY_ID</code> and
+        <code>KALSHI_PRIVATE_KEY_PATH</code> from a local gitignored
+        <code>.env</code> — never typed into this page, never committed.
+        Connecting does <strong>not</strong> enable live order placement.
       </p>
     </div>
     <form id="account-form" class="account-form">
-      <label>
-        Environment
-        <select id="account-env">
-          <option value="prod">Production (external-api.kalshi.com)</option>
-          <option value="demo">Demo (external-api.demo.kalshi.co)</option>
-        </select>
-      </label>
-      <label>
-        API Key ID
-        <input id="account-key-id" type="text" spellcheck="false" autocomplete="off" placeholder="a952bcbe-ec3b-4b5b-b8f9-…">
-      </label>
-      <label class="wide">
-        Path to RSA private key
-        <input id="account-key-path" type="text" spellcheck="false" placeholder="C:\Users\Rk\.kalshi\kalshi.key">
-      </label>
-      <label class="wide">
-        Or paste PEM (local store only)
-        <textarea id="account-key-pem" rows="4" spellcheck="false" placeholder="-----BEGIN RSA PRIVATE KEY-----"></textarea>
-        <span class="fine">Leave blank if using a file path.</span>
-      </label>
       <div class="account-status-row">
         <span class="conn disconnected" id="account-conn">Disconnected</span>
-        <span class="fine" id="account-hint">Create keys at Kalshi Account &amp; security → API Keys (demo or prod).</span>
+        <span class="fine" id="account-hint">Copy .env.example to .env, then Connect. Demo vs prod is KALSHI_ENVIRONMENT.</span>
       </div>
       <label class="inline coming-soon">
         <input type="checkbox" id="enable-live-trading" disabled>
@@ -399,6 +380,6 @@
     <span id="footer-meta">localhost · paper_mode=true · live.enabled cannot be turned on from this UI</span>
   </footer>
 
-  <script src="/static/app.js?v=account2"></script>
+  <script src="/static/app.js?v=account3"></script>
 </body>
 </html>
