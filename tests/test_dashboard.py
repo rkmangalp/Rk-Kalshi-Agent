@@ -832,7 +832,7 @@ class DashboardApiTests(unittest.TestCase):
                 body = started.json()
                 self.assertTrue(body["live_enabled"])
                 self.assertFalse(body["paper_mode"])
-                self.assertAlmostEqual(body["session"]["max_dollars_per_ticker"], 10.0)
+                self.assertAlmostEqual(body["session"]["max_dollars_per_ticker"], 20.0)
                 self.assertLessEqual(body["session"]["daily_loss_limit"], 25.0)
                 self.http.post("/api/stop")
                 deadline = time.time() + 4

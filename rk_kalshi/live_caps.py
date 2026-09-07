@@ -22,9 +22,9 @@ from rk_kalshi.fees import quadratic_fee_dollars
 CREATE_ORDER_PATH = "/portfolio/events/orders"
 CANCEL_ORDER_PATH = "/portfolio/events/orders/{order_id}"
 
-LIVE_MAX_DOLLARS_DEFAULT = 5.0
-LIVE_MAX_DOLLARS_HARD_CEILING = 10.0
-LIVE_DAILY_LOSS_DEFAULT = 10.0
+LIVE_MAX_DOLLARS_DEFAULT = 20.0
+LIVE_MAX_DOLLARS_HARD_CEILING = 20.0
+LIVE_DAILY_LOSS_DEFAULT = 20.0
 LIVE_DAILY_LOSS_HARD_CEILING = 25.0
 LIVE_TIME_IN_FORCE = "immediate_or_cancel"
 LIVE_SELF_TRADE_PREVENTION = "taker_at_cross"

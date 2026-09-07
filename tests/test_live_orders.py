@@ -7,8 +7,12 @@ from rk_kalshi.config import AppConfig
 from rk_kalshi.execution import LiveKalshiExecution, LiveOrderRejected, LiveTradingDisabledError, PaperExecution
 from rk_kalshi.live_caps import (
     CREATE_ORDER_PATH,
+    LIVE_DAILY_LOSS_DEFAULT,
+    LIVE_DAILY_LOSS_HARD_CEILING,
+    LIVE_MAX_DOLLARS_DEFAULT,
     LIVE_MAX_DOLLARS_HARD_CEILING,
     LiveStartError,
+    clamp_live_daily_loss,
     clamp_live_dollars,
     create_order_v2_body,
     require_live_credentials,
@@ -48,9 +52,23 @@ class LiveCapsTests(unittest.TestCase):
         self.assertFalse(LiveKalshiExecution(enabled=True).enabled)
 
     def test_hard_ceiling_clamps_ui_request(self):
+        self.assertEqual(LIVE_MAX_DOLLARS_DEFAULT, 20.0)
+        self.assertEqual(LIVE_MAX_DOLLARS_HARD_CEILING, 20.0)
+        self.assertEqual(LIVE_DAILY_LOSS_DEFAULT, 20.0)
+        self.assertEqual(LIVE_DAILY_LOSS_HARD_CEILING, 25.0)
         self.assertEqual(clamp_live_dollars(5), 5)
+        self.assertEqual(clamp_live_dollars(20), 20)
         self.assertEqual(clamp_live_dollars(25), LIVE_MAX_DOLLARS_HARD_CEILING)
         self.assertEqual(clamp_live_dollars(10), 10)
+        self.assertEqual(clamp_live_dollars(0), LIVE_MAX_DOLLARS_DEFAULT)
+        self.assertEqual(clamp_live_daily_loss(40), LIVE_DAILY_LOSS_HARD_CEILING)
+        self.assertEqual(clamp_live_daily_loss(0), LIVE_DAILY_LOSS_DEFAULT)
+
+    def test_paper_does_not_use_live_ceiling(self):
+        cfg = AppConfig(live_enabled=False, max_dollars_per_ticker=25.0, daily_loss_limit=40.0)
+        risk = RiskManager(cfg)
+        self.assertEqual(risk.max_dollars_per_ticker(), 25.0)
+        self.assertEqual(risk.daily_loss_limit(), 40.0)
 
     def test_v2_order_body_uses_bid_ask_and_ioc(self):
         body = create_order_v2_body(ticker="KX-1", side="buy", contracts=1, price=0.56)
@@ -121,12 +139,12 @@ class LiveExecutionTests(unittest.TestCase):
         )
         risk = RiskManager(cfg)
         self.assertFalse(risk.can_size_up(new_state(cfg, day="2026-09-06")))
-        self.assertEqual(risk.max_dollars_per_ticker(), 10.0)
+        self.assertEqual(risk.max_dollars_per_ticker(), 20.0)
         self.assertEqual(risk.daily_loss_limit(), 25.0)
         state = new_state(cfg, day="2026-09-06")
         decision = risk.approve(_signal(contracts=40, fill_price=0.40, live_mid=0.40), state)
         self.assertTrue(decision.ok)
-        self.assertLessEqual(decision.contracts * 0.40, 10.0 + 1e-9)
+        self.assertLessEqual(decision.contracts * 0.40, 20.0 + 1e-9)
 
         state.cash = 70.0
         state.start_of_day_equity = 100.0

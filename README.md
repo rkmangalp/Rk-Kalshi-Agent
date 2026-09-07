@@ -62,9 +62,9 @@ Kalshi signed REST  →  same signals   →  RiskManager  →  LiveKalshiExecuti
    fixed-point `count`/`price`, `immediate_or_cancel`). Paper journal stays
    separate; live fills/orders show in the Live account panel.
 3. **Risk** (`rk_kalshi/risk.py`): paper defaults max **$5** notional per
-   ticker and daily loss kill-switch **$15**. Live clamps to default **$5**
-   per trade (hard ceiling **$10** even if the UI asks higher) and default
-   **$10** daily loss (hard ceiling **$25**). **No martingale**. `allow_size_up`
+   ticker and daily loss kill-switch **$15**. Live clamps to default **$20**
+   per trade (hard ceiling **$20** even if the UI asks higher) and default
+   **$20** daily loss (hard ceiling **$25**). **No martingale**. `allow_size_up`
    stays **false** on the live path.
 4. **Latency**: each cycle records `latency_ms` from the Kalshi HTTP scan.
 
@@ -128,7 +128,7 @@ book, costs tokens, and is **not** a guaranteed edge.
 
 To place **one real order path** on that same match: switch the dashboard
 **Paper | Live** control to **Live**, Connect, confirm both real-money boxes,
-then Start. Caps apply ($5 default / $10 hard ceiling per trade). Switch
+then Start. Caps apply ($20 default / $20 hard ceiling per trade). Switch
 back to **Paper** to disarm. Never paste keys in the UI or in chat.
 
 Example Kalshi URLs:
@@ -295,8 +295,8 @@ Defaults live in `config.yaml`:
 | `signal.llm_max_markets_per_call` | `6` | Cap markets sent to ChatGPT per cycle |
 | `kalshi.series_tickers` | `KXATPMATCH`, `KXWTAMATCH`, `KXITFWMATCH`, `KXITFMMATCH`, `KXATPCHALLENGERMATCH` | Match series |
 | `live.enabled` | `false` | YAML default; dashboard still requires Connect + confirmation |
-| `live.max_dollars_per_ticker` | `5` | Live default $/trade (hard ceiling $10 in code) |
-| `live.daily_loss_limit` | `10` | Live daily kill-switch (hard ceiling $25 in code) |
+| `live.max_dollars_per_ticker` | `20` | Live default $/trade (hard ceiling $20 in code) |
+| `live.daily_loss_limit` | `20` | Live daily kill-switch (hard ceiling $25 in code) |
 | `account.environment` | `prod` | Default demo/prod if `.env` omits `KALSHI_ENVIRONMENT` — live start **refuses** a blank/ambiguous env |
 
 Public market-data base URL: `https://external-api.kalshi.com/trade-api/v2`.
@@ -349,9 +349,9 @@ kill-switch hits a resting remainder.
 
 **Non-bypassable live caps** (code, not YAML):
 
-- Max **$5** per trade/ticker by default; UI/style values above **$10** are
-  clamped to $10.
-- Daily loss kill-switch default **$10** (hard ceiling $25). New live orders
+- Max **$20** per trade/ticker by default; UI/style values above **$20** are
+  clamped to $20.
+- Daily loss kill-switch default **$20** (hard ceiling $25). New live orders
   stop for the UTC day.
 - `allow_size_up: false` and no martingale, even if config is flipped.
 - Contract count is limited so notional + fee stay under the dollar cap.
