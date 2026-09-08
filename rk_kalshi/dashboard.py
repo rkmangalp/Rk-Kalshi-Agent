@@ -40,7 +40,7 @@ from rk_kalshi.catalog import (
     trade_flags_for_category,
 )
 from rk_kalshi.client import KalshiPublicClient
-from rk_kalshi.config import AppConfig, load_config
+from rk_kalshi.config import AppConfig, _signal_mode, load_config
 from rk_kalshi.journal import clear_fill_logs, read_fills, summarize_pnl
 from rk_kalshi.kalshi_url import EXAMPLE_CONTRACT_URLS, KalshiUrlError, parse_contract
 from rk_kalshi.live_caps import (
@@ -354,6 +354,10 @@ class RunController:
                         )
                     if scan.get("llm_note"):
                         self._log(f"  ChatGPT: {scan.get('llm_note')}")
+                    if scan.get("swing_note"):
+                        self._log(f"  swing: {scan.get('swing_note')}")
+                    if scan.get("resting"):
+                        self._log(f"  resting GTC orders: {scan.get('resting')}")
                     if (
                         self.cfg.trade_tennis
                         and self.cfg.live_matches_only
@@ -509,7 +513,9 @@ class DashboardService:
             live_matches_only=bool(live_matches_only),
             trade_bitcoin=bool(trade_bitcoin),
             trade_tennis=bool(trade_tennis),
-            signal_mode=self.cfg.signal_mode if signal_mode is None else str(signal_mode),
+            signal_mode=_signal_mode(
+                self.cfg.signal_mode if signal_mode is None else str(signal_mode)
+            ),
             target_url=self.cfg.target_url if target_url is None else target_url,
             target_event_ticker=(
                 self.cfg.target_event_ticker if target_event_ticker is None else target_event_ticker
@@ -797,7 +803,7 @@ def _cfg_from_session(cfg: AppConfig) -> AppConfig:
         live_matches_only=bool(raw.get("live_matches_only", cfg.live_matches_only)),
         trade_bitcoin=bool(raw.get("trade_bitcoin", cfg.trade_bitcoin)),
         trade_tennis=bool(raw.get("trade_tennis", cfg.trade_tennis)),
-        signal_mode=str(raw.get("signal_mode") or cfg.signal_mode),
+        signal_mode=_signal_mode(str(raw.get("signal_mode") or cfg.signal_mode)),
         target_url=str(raw.get("target_url") or cfg.target_url),
         target_event_ticker=str(raw.get("target_event_ticker") or cfg.target_event_ticker),
         target_market_ticker=str(raw.get("target_market_ticker") or cfg.target_market_ticker),
@@ -818,7 +824,7 @@ def _cfg_from_session(cfg: AppConfig) -> AppConfig:
         daily_loss_limit=float(raw.get("daily_loss_limit", restored.daily_loss_limit)),
         cycle_sleep_s=float(raw.get("cycle_sleep_s", restored.cycle_sleep_s)),
         live_matches_only=bool(raw.get("live_matches_only", restored.live_matches_only)),
-        signal_mode=str(raw.get("signal_mode") or restored.signal_mode),
+        signal_mode=_signal_mode(str(raw.get("signal_mode") or restored.signal_mode)),
         target_url=str(raw.get("target_url") or restored.target_url),
         target_event_ticker=str(raw.get("target_event_ticker") or restored.target_event_ticker),
         target_market_ticker=str(raw.get("target_market_ticker") or restored.target_market_ticker),
@@ -1011,6 +1017,7 @@ def _status_payload(service: DashboardService) -> dict[str, Any]:
         "signal_algorithm": algorithm_label(service.cfg.signal_mode),
         "signal_disclaimer": SIGNAL_DISCLAIMER,
         "signal_mode": service.cfg.signal_mode,
+        "pending_orders": list(state.pending_orders or []),
         "llm_model": service.cfg.llm_model,
         "openai_configured": openai_configured(),
         "gamma": service.cfg.gamma,

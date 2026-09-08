@@ -122,6 +122,9 @@ class DashboardApiTests(unittest.TestCase):
         self.assertIn("trade-style-hint", response.text)
         self.assertIn('value="active" selected', response.text)
         self.assertIn('value="hybrid" selected', response.text)
+        self.assertIn('value="swing"', response.text)
+        self.assertIn("pending-table", response.text)
+        self.assertIn("Resting GTC", response.text)
         self.assertIn("Category / live match", response.text)
         self.assertNotIn("id=\"trade-bitcoin\"", response.text)
         self.assertNotIn("id=\"contract-select\"", response.text)
@@ -201,6 +204,7 @@ class DashboardApiTests(unittest.TestCase):
         self.assertFalse(body["use_ema_fallback"])
         self.assertEqual(body["signal_mode"], "as_obi")
         self.assertIn("openai_configured", body)
+        self.assertEqual(body.get("pending_orders"), [])
 
     def test_markets_reuses_client(self):
         response = self.http.get("/api/markets")

@@ -296,6 +296,17 @@ class SignalEngineTests(unittest.TestCase):
         self.assertIsNotNone(locked)
         self.assertTrue(locked.pair_lock)
 
+    def test_evaluate_passes_inventory_avg_price_for_pair_lock(self):
+        from rk_kalshi.state import new_state
+
+        market = _market(yes_bid=0.81, yes_ask=0.83, last_price=0.82)
+        state = new_state(self.cfg, day="2026-09-08")
+        state.positions[market.ticker] = Position(contracts=62, avg_price=0.53)
+        signals = self.engine.evaluate([market], inventory=state, now=1_000_000.0)
+        self.assertEqual(len(signals), 1)
+        self.assertTrue(signals[0].pair_lock)
+        self.assertEqual(signals[0].contracts, 62)
+
 
 if __name__ == "__main__":
     unittest.main()

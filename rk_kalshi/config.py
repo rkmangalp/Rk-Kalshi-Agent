@@ -61,6 +61,15 @@ class AppConfig:
     live_matches_only: bool = True
     live_pre_start_minutes: float = 10.0
     live_max_hours: float = 12.0
+    swing_buy_low: float = 0.12
+    swing_buy_high: float = 0.42
+    swing_min_dump_cents: float = 18.0
+    swing_min_range_cents: float = 22.0
+    swing_target_cents: float = 10.0
+    swing_trail_cents: float = 4.0
+    swing_max_hold_cents: float = 25.0
+    swing_lookback: int = 16
+    swing_max_spread_cents: float = 16.0
     fill_log_csv: Path = Path("data/fills.csv")
     fill_log_jsonl: Path = Path("data/fills.jsonl")
     state_path: Path = Path("data/paper_state.json")
@@ -101,6 +110,8 @@ def _signal_mode(value: object) -> str:
         return "llm"
     if text in {"hybrid", "as_llm"}:
         return "hybrid"
+    if text in {"swing", "tennis_swing", "dump", "bounce", "dump_bounce"}:
+        return "swing"
     return "as_obi"
 
 
@@ -165,6 +176,15 @@ def config_from_mapping(raw: dict[str, Any]) -> AppConfig:
         live_matches_only=bool(signal.get("live_matches_only", True)),
         live_pre_start_minutes=float(signal.get("live_pre_start_minutes", 10.0)),
         live_max_hours=float(signal.get("live_max_hours", 12.0)),
+        swing_buy_low=float(signal.get("swing_buy_low", 0.12)),
+        swing_buy_high=float(signal.get("swing_buy_high", 0.42)),
+        swing_min_dump_cents=float(signal.get("swing_min_dump_cents", 18.0)),
+        swing_min_range_cents=float(signal.get("swing_min_range_cents", 22.0)),
+        swing_target_cents=float(signal.get("swing_target_cents", 10.0)),
+        swing_trail_cents=float(signal.get("swing_trail_cents", 4.0)),
+        swing_max_hold_cents=float(signal.get("swing_max_hold_cents", 25.0)),
+        swing_lookback=max(4, int(signal.get("swing_lookback", 16))),
+        swing_max_spread_cents=float(signal.get("swing_max_spread_cents", 16.0)),
         fill_log_csv=Path(paper.get("fill_log_csv", "data/fills.csv")),
         fill_log_jsonl=Path(paper.get("fill_log_jsonl", "data/fills.jsonl")),
         state_path=Path(paper.get("state_path", "data/paper_state.json")),

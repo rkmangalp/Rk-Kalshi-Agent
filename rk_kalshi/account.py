@@ -33,6 +33,7 @@ from rk_kalshi.live_caps import (
     CREATE_ORDER_PATH,
     cancel_order_path,
     create_order_v2_body,
+    get_order_path,
 )
 from rk_kalshi.models import parse_count, parse_dollars
 from rk_kalshi.state import local_now_iso
@@ -241,6 +242,16 @@ class KalshiSignedClient:
         if ticker:
             params = {"market_ticker": ticker}
         return self.delete(cancel_order_path(order_id), params=params)
+
+    def get_order(self, order_id: str) -> tuple[dict[str, Any], float]:
+        """GET a single order. Read path — does not require live arming."""
+        oid = str(order_id)
+        try:
+            payload, latency_ms = self.get_json(get_order_path(oid))
+        except AccountApiError:
+            payload, latency_ms = self.get_json(f"/portfolio/events/orders/{oid}")
+        inner = payload.get("order") if isinstance(payload.get("order"), dict) else payload
+        return inner, latency_ms
 
     def _require_orders(self) -> None:
         if not self.orders_enabled:
