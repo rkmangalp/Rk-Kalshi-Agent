@@ -15,9 +15,10 @@ from rk_kalshi.live_caps import (
     clamp_live_daily_loss,
     clamp_live_dollars,
     create_order_v2_body,
+    max_contracts_for_cap,
     require_live_credentials,
 )
-from rk_kalshi.models import Signal
+from rk_kalshi.models import Position, Signal
 from rk_kalshi.risk import RiskManager
 from rk_kalshi.runner import PaperRunner
 from rk_kalshi.state import new_state
@@ -63,6 +64,9 @@ class LiveCapsTests(unittest.TestCase):
         self.assertEqual(clamp_live_dollars(0), LIVE_MAX_DOLLARS_DEFAULT)
         self.assertEqual(clamp_live_daily_loss(40), LIVE_DAILY_LOSS_HARD_CEILING)
         self.assertEqual(clamp_live_daily_loss(0), LIVE_DAILY_LOSS_DEFAULT)
+        sized = max_contracts_for_cap(0.53, 20.0)
+        self.assertGreater(sized, 2)
+        self.assertLessEqual(sized * 0.53, 20.0 + 1e-9)
 
     def test_paper_does_not_use_live_ceiling(self):
         cfg = AppConfig(live_enabled=False, max_dollars_per_ticker=25.0, daily_loss_limit=40.0)
@@ -181,6 +185,29 @@ class LiveExecutionTests(unittest.TestCase):
         self.assertEqual(order["ticker"], "T")
         self.assertEqual(order["contracts"], 1)
         self.assertFalse(fill.can_size_up)
+
+    def test_live_cover_posts_full_position_not_dollar_cap(self):
+        cfg = AppConfig(
+            live_enabled=True,
+            max_dollars_per_ticker=20.0,
+            daily_loss_limit=20.0,
+            allow_size_up=False,
+            base_contracts=2,
+            starting_cash=100.0,
+        )
+        signed = FakeSignedClient(_creds())
+        signed.orders_enabled = True
+        risk = RiskManager(cfg)
+        live = LiveKalshiExecution(cfg, risk, client=signed, enabled=True)
+        state = new_state(cfg, day="2026-09-06")
+        state.positions["T"] = Position(contracts=62, avg_price=0.53)
+        cover = _signal(side="sell", contracts=62, fill_price=0.81, live_mid=0.82, yes_bid=0.81, yes_ask=0.83, pair_lock=True)
+        with patch.dict("os.environ", {"KALSHI_ENVIRONMENT": "demo"}):
+            fill = live.execute(cover, state, 62, 8.0)
+        self.assertEqual(fill.mode, "live")
+        self.assertEqual(signed.created_orders[0]["contracts"], 62)
+        self.assertEqual(signed.created_orders[0]["side"], "sell")
+        self.assertEqual(state.position("T").contracts, 0)
 
 
 class LiveRunnerIsolationTests(unittest.TestCase):

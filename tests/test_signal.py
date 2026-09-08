@@ -256,6 +256,46 @@ class SignalEngineTests(unittest.TestCase):
         signal = self.engine.evaluate_one(market, inventory_q=20, now=1_000_000.0)
         self.assertIsNone(signal)
 
+    def test_pair_lock_sells_yes_when_no_is_cheap(self):
+        # Botic-style: long YES at 53¢, NO offered at 19¢ → YES bid ~81¢.
+        market = _market(yes_bid=0.81, yes_ask=0.83, last_price=0.82)
+        pos = Position(contracts=62, avg_price=0.53)
+        signal = self.engine.evaluate_one(
+            market, inventory={market.ticker: pos}, now=1_000_000.0
+        )
+        self.assertIsNotNone(signal)
+        self.assertTrue(signal.pair_lock)
+        self.assertEqual(signal.side, "sell")
+        self.assertEqual(signal.contracts, 62)
+        self.assertAlmostEqual(signal.fill_price, 0.81)
+        self.assertGreater(signal.edge_cents, 20.0)
+        self.assertIn("PAIR LOCK", signal.edge_thesis)
+
+    def test_pair_lock_skips_when_other_side_is_not_cheap(self):
+        market = _market(yes_bid=0.495, yes_ask=0.505, last_price=0.50)
+        pos = Position(contracts=20, avg_price=0.50)
+        signal = self.engine.evaluate_one(
+            market, inventory={market.ticker: pos}, now=1_000_000.0
+        )
+        self.assertIsNotNone(signal)
+        self.assertFalse(signal.pair_lock)
+        self.assertEqual(signal.side, "sell")
+
+    def test_live_holds_open_until_pair_lock(self):
+        live = SignalEngine(AppConfig(live_enabled=True, edge_threshold_cents=3.0, kappa=10.0, gamma=0.5))
+        market = _market(yes_bid=0.54, yes_ask=0.56, last_price=0.55)
+        pos = Position(contracts=10, avg_price=0.53)
+        self.assertIsNone(
+            live.evaluate_one(market, inventory={market.ticker: pos}, now=1_000_000.0)
+        )
+        locked = live.evaluate_one(
+            _market(yes_bid=0.81, yes_ask=0.83, last_price=0.82, ticker=market.ticker),
+            inventory={market.ticker: pos},
+            now=1_000_000.0,
+        )
+        self.assertIsNotNone(locked)
+        self.assertTrue(locked.pair_lock)
+
 
 if __name__ == "__main__":
     unittest.main()

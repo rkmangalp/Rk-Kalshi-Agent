@@ -64,8 +64,10 @@ Kalshi signed REST  →  same signals   →  RiskManager  →  LiveKalshiExecuti
 3. **Risk** (`rk_kalshi/risk.py`): paper defaults max **$5** notional per
    ticker and daily loss kill-switch **$15**. Live clamps to default **$20**
    per trade (hard ceiling **$20** even if the UI asks higher) and default
-   **$20** daily loss (hard ceiling **$25**). **No martingale**. `allow_size_up`
-   stays **false** on the live path.
+   **$20** daily loss (hard ceiling **$25**). Live **sizes each new entry to
+   that dollar cap**. After a YES fill it can flatten by selling YES (buying
+   NO) when the pair locks a profit after fees. **No martingale**.
+   `allow_size_up` stays **false** on the live path.
 4. **Latency**: each cycle records `latency_ms` from the Kalshi HTTP scan.
 
 ## Setup
@@ -128,7 +130,9 @@ book, costs tokens, and is **not** a guaranteed edge.
 
 To place **one real order path** on that same match: switch the dashboard
 **Paper | Live** control to **Live**, Connect, confirm both real-money boxes,
-then Start. Caps apply ($20 default / $20 hard ceiling per trade). Switch
+then Start. Caps apply ($20 default / $20 hard ceiling per trade); Live sizes
+the order to that cap. After a fill it can take the other side to lock a
+profit when YES+NO still pay under $1. Switch
 back to **Paper** to disarm. Never paste keys in the UI or in chat.
 
 Example Kalshi URLs:
@@ -350,7 +354,11 @@ kill-switch hits a resting remainder.
 **Non-bypassable live caps** (code, not YAML):
 
 - Max **$20** per trade/ticker by default; UI/style values above **$20** are
-  clamped to $20.
+  clamped to $20. **Live entries size up to that cap** (not paper’s 1–2
+  contracts). Flattening the other side does not use the entry cap.
+- After a live YES fill, the bot can **sell YES / buy NO** on the same ticker
+  when entry + other-side + fees still pay under $1 (pair-lock). ChatGPT
+  cannot skip that cover.
 - Daily loss kill-switch default **$20** (hard ceiling $25). New live orders
   stop for the UTC day.
 - `allow_size_up: false` and no martingale, even if config is flipped.

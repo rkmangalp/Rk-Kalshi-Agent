@@ -66,6 +66,8 @@
           Live losses are real. Hard caps (cannot be raised in the live path):
           max <strong>$20</strong> per trade by default (hard ceiling <strong>$20</strong>),
           daily loss kill-switch default <strong>$20</strong>.
+          Live sizes each new order to the dollar cap. After a YES fill it can
+          sell YES (buy NO) to lock a profit when the pair still pays under $1.
           <code>can_size_up</code> stays locked. Never paste API keys in this UI or in chat.
           Paper mode stays the default until you switch to Live, Connect, and confirm.
           Switch back to <strong>Paper</strong> to disarm. Clear on this desk is
@@ -471,7 +473,8 @@
         <p class="fine live-warning">
           REAL MONEY. Hard caps: max <strong>$20</strong>/trade default
           (ceiling <strong>$20</strong>), daily loss default <strong>$20</strong>
-          (ceiling <strong>$25</strong>). <code>can_size_up</code> stays locked.
+          (ceiling <strong>$25</strong>). Live sizes to the $ cap; after a YES
+          fill it can sell YES (buy NO) to lock a profit. <code>can_size_up</code> stays locked.
         </p>
       </div>
       <p class="fine error" id="desk-gate-error" hidden></p>
@@ -482,6 +485,6 @@
     </div>
   </div>
 
-  <script src="/static/app.js?v=desk3"></script>
+  <script src="/static/app.js?v=desk4"></script>
 </body>
 </html>

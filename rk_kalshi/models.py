@@ -101,6 +101,7 @@ class Signal:
     yes_ask: float
     last_price: float
     fair_yes: float
+    pair_lock: bool = False
 
 
 @dataclass

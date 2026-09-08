@@ -82,15 +82,24 @@ def max_contracts_for_cap(
     *,
     fee_coefficient: float = 0.07,
     fee_multiplier: float = 1.0,
-    base_contracts: int = 1,
+    base_contracts: int | None = None,
+    max_contracts: int | None = None,
 ) -> int:
-    """Largest whole-contract size that stays under the live dollar cap."""
+    """Largest whole-contract size that stays under the live dollar cap.
+
+    ``max_contracts`` (or legacy ``base_contracts``) is an optional upper bound.
+    When omitted, size is the most contracts whose notional + fee fit the cap.
+    Flattening covers should not use this helper — they are not new exposure.
+    """
     cap = clamp_live_dollars(max_dollars)
     px = float(price)
     if px <= 0:
         return 0
-    limit = max(1, int(base_contracts))
-    for contracts in range(limit, 0, -1):
+    upper = int(cap / px) + 2
+    bound = max_contracts if max_contracts is not None else base_contracts
+    if bound is not None:
+        upper = min(upper, max(0, int(bound)))
+    for contracts in range(upper, 0, -1):
         fee = quadratic_fee_dollars(px, contracts, fee_coefficient, fee_multiplier)
         if contracts * px + fee <= cap + 1e-9:
             return contracts

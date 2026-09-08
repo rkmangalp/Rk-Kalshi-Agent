@@ -114,36 +114,42 @@ class LlmResearchTrader:
         now: float | None = None,
     ) -> list[Signal]:
         mode = (self.cfg.signal_mode or "as_obi").strip().lower()
+        locks = [s for s in as_signals if s.pair_lock]
+        rest = [s for s in as_signals if not s.pair_lock]
         if mode not in {"llm", "hybrid"}:
             self.last_note = ""
             return as_signals
         if not self.configured():
             self.last_note = MISSING_OPENAI_MESSAGE
-            return [] if mode == "llm" else as_signals
-        if mode == "hybrid" and not as_signals:
+            return locks if mode == "llm" else as_signals
+        if mode == "hybrid" and not rest and not locks:
             self.last_note = "hybrid: no AS+OBI candidates; skipped ChatGPT"
             return []
+        if mode == "hybrid" and not rest:
+            self.last_note = "hybrid: pair-lock only; skipped ChatGPT"
+            return locks
 
         stamp = time.time() if now is None else now
         min_interval = max(0.0, float(self.cfg.llm_min_interval_s))
         if self._last_call_ts and (stamp - self._last_call_ts) < min_interval:
             self.last_note = "ChatGPT rate-limited this cycle"
-            return [] if mode == "llm" else as_signals
+            return locks if mode == "llm" else as_signals
 
-        pool = as_signals if mode == "hybrid" else markets
+        pool = rest if mode == "hybrid" else markets
         chosen_markets = _markets_for_llm(markets, pool, self.cfg.llm_max_markets_per_call)
         if not chosen_markets:
             self.last_note = "no markets for ChatGPT"
-            return []
+            return locks
 
         try:
-            decisions = self._decide(chosen_markets, inventory, as_signals, mode)
+            decisions = self._decide(chosen_markets, inventory, rest if mode == "hybrid" else as_signals, mode)
         except (httpx.HTTPError, OSError, RuntimeError, json.JSONDecodeError, ValueError, TypeError) as exc:
             self.last_note = f"ChatGPT request failed: {exc}"
-            return [] if mode == "llm" else as_signals
+            return locks if mode == "llm" else as_signals
         self._last_call_ts = stamp
         if mode == "hybrid":
-            return _apply_hybrid(as_signals, decisions, self.cfg.llm_model)
+            confirmed = _apply_hybrid(rest, decisions, self.cfg.llm_model)
+            return locks + confirmed
         out: list[Signal] = []
         by_ticker = {m.ticker: m for m in chosen_markets}
         for decision in decisions:
@@ -154,7 +160,7 @@ class LlmResearchTrader:
             if signal is not None:
                 out.append(signal)
         out.sort(key=lambda s: s.edge_cents, reverse=True)
-        return out
+        return locks + out
 
     def _decide(
         self,
@@ -318,6 +324,7 @@ def _apply_hybrid(as_signals: list[Signal], decisions: list[LlmDecision], model:
                 yes_ask=signal.yes_ask,
                 last_price=signal.last_price,
                 fair_yes=signal.fair_yes,
+                pair_lock=signal.pair_lock,
             )
         )
     return kept

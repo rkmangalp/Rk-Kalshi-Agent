@@ -88,6 +88,31 @@ class LlmTraderTests(unittest.TestCase):
         self.assertEqual(kept, [])
         self.assertEqual(fake.calls, 1)
 
+    def test_hybrid_skip_keeps_pair_lock(self):
+        from dataclasses import replace
+
+        market = _market()
+        cfg = AppConfig(signal_mode="hybrid", llm_min_interval_s=0)
+        fake = FakeChat(
+            {
+                "decisions": [
+                    {
+                        "ticker": market.ticker,
+                        "action": "skip",
+                        "edge_cents_estimate": 9.0,
+                        "confidence": 0.9,
+                        "thesis": "no clear edge",
+                    }
+                ]
+            }
+        )
+        trader = LlmResearchTrader(cfg, api_key="test", client=fake)
+        lock = replace(_as_buy(market), side="sell", pair_lock=True, edge_thesis="PAIR LOCK", contracts=62)
+        kept = trader.refine([market], [lock, _as_buy(market)])
+        self.assertEqual(len(kept), 1)
+        self.assertTrue(kept[0].pair_lock)
+        self.assertEqual(kept[0].contracts, 62)
+
     def test_hybrid_confirm_keeps_as_signal_and_appends_thesis(self):
         market = _market()
         cfg = AppConfig(signal_mode="hybrid", llm_min_interval_s=0, llm_model="gpt-4o-mini")
