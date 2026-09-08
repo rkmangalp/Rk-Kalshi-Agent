@@ -74,6 +74,17 @@ class ConfigTests(unittest.TestCase):
         self.assertAlmostEqual(cfg.kappa, 2.5)
         self.assertEqual(cfg.signal_mode, "hybrid")
 
+    def test_swing_mode_and_knobs_from_yaml(self):
+        with tempfile.NamedTemporaryFile("w", suffix=".yaml", delete=False) as handle:
+            handle.write(
+                "signal:\n  mode: tennis_swing\n  swing_target_cents: 12\n  swing_buy_low: 0.15\n"
+            )
+            path = handle.name
+        cfg = load_config(path)
+        self.assertEqual(cfg.signal_mode, "swing")
+        self.assertAlmostEqual(cfg.swing_target_cents, 12.0)
+        self.assertAlmostEqual(cfg.swing_buy_low, 0.15)
+
 
 if __name__ == "__main__":
     unittest.main()

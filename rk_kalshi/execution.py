@@ -2,20 +2,26 @@
 
 from __future__ import annotations
 
+import uuid
+
 from rk_kalshi.account import AccountApiError, KalshiSignedClient
 from rk_kalshi.config import AppConfig
 from rk_kalshi.fees import quadratic_fee_dollars
 from rk_kalshi.live_caps import (
     LIVE_DISABLED_MESSAGE,
+    LIVE_TIME_IN_FORCE,
+    LIVE_TIME_IN_FORCE_GTC,
     clamp_live_dollars,
     create_order_v2_body,
+    is_gtc_signal,
     live_limit_price,
     max_contracts_for_cap,
     require_live_credentials,
+    resting_limit_price,
 )
 from rk_kalshi.models import Fill, PaperState, Signal, parse_count, parse_dollars
 from rk_kalshi.risk import RiskManager
-from rk_kalshi.state import apply_fill, local_now_iso
+from rk_kalshi.state import apply_fill, local_now_iso, make_pending, park_pending
 
 
 class LiveTradingDisabledError(RuntimeError):
@@ -42,7 +48,26 @@ class PaperExecution:
         contracts: int,
         latency_ms: float,
         marks: dict[str, float] | None = None,
-    ) -> Fill:
+    ) -> Fill | None:
+        if is_gtc_signal(signal):
+            row = make_pending(
+                order_id=f"paper-{uuid.uuid4().hex[:12]}",
+                ticker=signal.ticker,
+                side=signal.side,
+                price=resting_limit_price(signal.fill_price),
+                contracts=int(contracts),
+                paper=True,
+                event_name=signal.event_name,
+                match_id=signal.match_id,
+                thesis=signal.edge_thesis,
+                live_mid=signal.live_mid,
+                yes_bid=signal.yes_bid,
+                yes_ask=signal.yes_ask,
+                edge_cents=signal.edge_cents,
+                edge_bps=signal.edge_bps,
+            )
+            park_pending(state, row)
+            return None
         fee = quadratic_fee_dollars(
             signal.fill_price,
             contracts,
@@ -119,12 +144,40 @@ class LiveKalshiExecution:
         marks: dict[str, float] | None = None,
         *args: object,
         **kwargs: object,
-    ) -> Fill:
+    ) -> Fill | None:
         if not self.enabled or not isinstance(signal, Signal) or state is None:
             raise LiveTradingDisabledError(LIVE_DISABLED_MESSAGE)
         payload, order_latency = self._submit_order(signal, state, int(contracts))
-        filled, fill_price, fee = _parse_live_fill(payload, signal, contracts)
+        body = _unwrap_order(payload)
+        filled, fill_price, fee = _parse_live_fill(body, signal, contracts)
+        remaining = parse_count(body.get("remaining_count"))
+        if remaining <= 0:
+            remaining = parse_count(body.get("remaining_count_fp"))
+        order_id = str(body.get("order_id") or payload.get("order_id") or "")
+        gtc = is_gtc_signal(signal)
         if filled <= 0:
+            if gtc and remaining > 0.009 and order_id:
+                park_pending(
+                    state,
+                    make_pending(
+                        order_id=order_id,
+                        ticker=signal.ticker,
+                        side=signal.side,
+                        price=resting_limit_price(signal.fill_price),
+                        contracts=max(1, int(round(remaining))),
+                        paper=False,
+                        event_name=signal.event_name,
+                        match_id=signal.match_id,
+                        thesis=signal.edge_thesis,
+                        live_mid=signal.live_mid,
+                        yes_bid=signal.yes_bid,
+                        yes_ask=signal.yes_ask,
+                        edge_cents=signal.edge_cents,
+                        edge_bps=signal.edge_bps,
+                    ),
+                )
+                self.open_order_ids.append(order_id)
+                return None
             raise LiveOrderRejected("live order did not fill (IOC canceled remaining)")
         realized_delta = apply_fill(
             state,
@@ -141,10 +194,29 @@ class LiveKalshiExecution:
             state.killed = True
             state.kill_reason = state.kill_reason or "daily loss kill-switch"
             self.cancel_open()
-        order_id = str(payload.get("order_id") or "")
-        remaining = parse_count(payload.get("remaining_count"))
         if remaining > 0.009 and order_id:
             self.open_order_ids.append(order_id)
+            if gtc:
+                park_pending(
+                    state,
+                    make_pending(
+                        order_id=order_id,
+                        ticker=signal.ticker,
+                        side=signal.side,
+                        price=resting_limit_price(signal.fill_price),
+                        contracts=max(1, int(round(remaining))),
+                        paper=False,
+                        event_name=signal.event_name,
+                        match_id=signal.match_id,
+                        thesis=signal.edge_thesis,
+                        live_mid=signal.live_mid,
+                        yes_bid=signal.yes_bid,
+                        yes_ask=signal.yes_ask,
+                        edge_cents=signal.edge_cents,
+                        edge_bps=signal.edge_bps,
+                        filled_so_far=filled,
+                    ),
+                )
         return Fill(
             timestamp=local_now_iso(),
             ticker=signal.ticker,
@@ -207,7 +279,10 @@ class LiveKalshiExecution:
             raise LiveOrderRejected("daily loss kill-switch")
         if int(contracts) <= 0:
             raise LiveOrderRejected("non-positive live size")
-        price = live_limit_price(signal.side, signal.yes_bid, signal.yes_ask, signal.fill_price)
+        if is_gtc_signal(signal):
+            price = resting_limit_price(signal.fill_price)
+        else:
+            price = live_limit_price(signal.side, signal.yes_bid, signal.yes_ask, signal.fill_price)
         held = int(state.position(signal.ticker).contracts)
         reducing = (held > 0 and signal.side == "sell") or (held < 0 and signal.side == "buy")
         if reducing:
@@ -227,11 +302,13 @@ class LiveKalshiExecution:
             exposure = abs(state.position(signal.ticker).contracts + (capped if signal.side == "buy" else -capped)) * price
             if exposure > clamp_live_dollars(self.cfg.max_dollars_per_ticker) + 1e-9:
                 raise LiveOrderRejected("live ticker cap would be exceeded")
+        tif = LIVE_TIME_IN_FORCE_GTC if is_gtc_signal(signal) else LIVE_TIME_IN_FORCE
         body = create_order_v2_body(
             ticker=signal.ticker,
             side=signal.side,
             contracts=capped,
             price=price,
+            time_in_force=tif,
         )
         try:
             payload, latency_ms = client.create_order(
@@ -255,17 +332,27 @@ class LiveKalshiExecution:
         return self.client
 
 
+def _unwrap_order(payload: dict) -> dict:
+    inner = payload.get("order") if isinstance(payload, dict) else None
+    if isinstance(inner, dict):
+        return inner
+    return payload if isinstance(payload, dict) else {}
+
+
 def _parse_live_fill(payload: dict, signal: Signal, requested: int) -> tuple[int, float, float]:
-    filled = parse_count(payload.get("fill_count"), default=0.0)
+    body = _unwrap_order(payload)
+    filled = parse_count(body.get("fill_count"), default=0.0)
+    if filled <= 0:
+        filled = parse_count(body.get("fill_count_fp"), default=0.0)
     if filled <= 0:
         return 0, 0.0, 0.0
     contracts = max(1, int(round(filled)))
     contracts = min(contracts, int(requested))
-    avg = parse_dollars(payload.get("average_fill_price"), default=0.0)
+    avg = parse_dollars(body.get("average_fill_price"), default=0.0)
     fill_price = avg if avg > 0 else live_limit_price(
         signal.side, signal.yes_bid, signal.yes_ask, signal.fill_price
     )
-    fee_each = parse_dollars(payload.get("average_fee_paid"), default=0.0)
+    fee_each = parse_dollars(body.get("average_fee_paid"), default=0.0)
     if fee_each > 0:
         fee = fee_each * contracts
     else:

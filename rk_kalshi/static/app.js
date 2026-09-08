@@ -50,6 +50,9 @@
     btnMarkets: $("btn-markets"),
     fillsBody: $("fills-body"),
     fillsMeta: $("fills-meta"),
+    pendingBody: $("pending-body"),
+    pendingMeta: $("pending-meta"),
+    signalModeHint: $("signal-mode-hint"),
     footer: $("footer-meta"),
     accountBanner: $("account-banner"),
     accountPill: $("account-pill"),
@@ -103,10 +106,14 @@
     : "";
   const LIVE_LEDE =
     "Same controls as Paper — category, live match, Safe · Conservative · Active · Aggressive, "
-    + "and as_obi / hybrid / llm research — but this desk spends <strong>real Kalshi cash</strong>. "
+    + "and as_obi / hybrid / llm / tennis-swing — but this desk spends <strong>real Kalshi cash</strong>. "
     + "Bankroll is your connected balance; max $/trade sizes the order (not 1–2 contracts) and daily loss is hard-capped. "
-    + "After a YES fill, the bot can sell YES (buy NO) when that round-trip locks a profit after fees. "
-    + "Hybrid / ChatGPT may inform new entries; <strong>pair-lock covers and risk gates always win</strong>. "
+    + "as_obi/hybrid can sell YES (buy NO) when a round-trip locks a profit after fees. "
+    + "<strong>Tennis swing</strong> posts one <strong>GTC</strong> buy on a dumped cheap YES, waits for the bounce "
+    + "(and waits longer if the mid is still printing highs), then one GTC sell of that same contract. "
+    + "IOC research orders often never rest on kalshi.com; GTC should show under Orders until fill. "
+    + "Kalshi does not publish serve or live score — swing uses the price path. "
+    + "Hybrid / ChatGPT may inform new as_obi entries; <strong>pair-lock covers, swing covers, and risk gates always win</strong>. "
     + "<strong>Not financial advice</strong>. There is <strong>no guaranteed profitable model</strong>. "
     + "<code>can_size_up</code> stays locked. Stop ends polling and cancels open orders from this desk. "
     + "<strong>Clear view</strong> wipes this screen’s log only — not cancel-all. "
@@ -295,6 +302,30 @@
     `).join("");
   }
 
+  function renderPending(orders) {
+    const rows = orders || [];
+    if (els.pendingMeta) {
+      els.pendingMeta.textContent =
+        `${rows.length} resting · this desk · not yet filled`;
+    }
+    if (!els.pendingBody) return;
+    if (!rows.length) {
+      els.pendingBody.innerHTML =
+        '<tr><td colspan="6" class="empty">No resting GTC on this desk.</td></tr>';
+      return;
+    }
+    els.pendingBody.innerHTML = rows.map((row) => `
+      <tr>
+        <td class="ticker">${escapeHtml(row.ticker || "")}</td>
+        <td>${escapeHtml(row.side || "")}</td>
+        <td class="num">${fmt(row.price)}</td>
+        <td class="num">${escapeHtml(String(row.contracts ?? ""))}</td>
+        <td>${escapeHtml(row.time_in_force || "good_till_canceled")}</td>
+        <td>${escapeHtml(row.event_name || "")}</td>
+      </tr>
+    `).join("");
+  }
+
   function renderFills(payload) {
     const rows = payload.fills || [];
     els.fillsMeta.textContent =
@@ -382,6 +413,7 @@
         els.categorySelect.value = status.target_category_id;
       }
       paintTradeStyleHint(status.trade_style_blurb);
+      paintSignalModeHint();
       els.startForm.dataset.seeded = "1";
       els.sleep.dataset.seeded = "1";
     }
@@ -474,6 +506,18 @@
     if (status && status.trade_bitcoin) return "Bitcoin";
     if (status && status.trade_tennis) return status.live_matches_only ? "live tennis" : "tennis";
     return "no books selected";
+  }
+
+  function paintSignalModeHint() {
+    if (!els.signalModeHint) return;
+    const mode = (els.signalMode && els.signalMode.value) || "";
+    if (mode === "swing") {
+      els.signalModeHint.textContent =
+        "Tennis swing: buy a dumped cheap YES as a resting GTC (around 12–42¢ after a sharp dump), wait if the mid is still printing highs, then sell the same contract after a ~10¢ bounce (or a 4¢ pullback from the peak). One buy/sell at a time. Kalshi does not publish serve or live score — the YES price path is the point proxy. Not a match predictor.";
+      return;
+    }
+    els.signalModeHint.textContent =
+      "Hybrid/LLM read OPENAI_API_KEY from a local .env only — never paste keys here. ChatGPT is asked to anticipate score/momentum swings, not just restate odds. Research is not a guaranteed edge. Tennis swing skips ChatGPT, uses the price path (Kalshi has no serve/score feed), and posts one GTC buy then one GTC sell.";
   }
 
   function paintTradeStyleHint(blurb) {
@@ -925,6 +969,7 @@
     renderRun(status.run || {});
     renderSummary(pnl, status);
     renderFills(fills);
+    renderPending(status.pending_orders || []);
   }
 
   async function refreshMarkets() {
@@ -1142,6 +1187,9 @@
         }).catch(() => {});
       }
     });
+  }
+  if (els.signalMode) {
+    els.signalMode.addEventListener("change", () => paintSignalModeHint());
   }
   async function syncLiveArm() {
     if (deskMode !== "live") return;
@@ -1401,6 +1449,7 @@
   fetchJSON("/api/presets").then((payload) => {
     stylePresets = payload || stylePresets;
     paintTradeStyleHint();
+    paintSignalModeHint();
   }).catch(() => {});
   bootDesk().then(() => refreshStatusBundle()).catch((err) => {
     els.log.textContent = `error: ${err.message}`;

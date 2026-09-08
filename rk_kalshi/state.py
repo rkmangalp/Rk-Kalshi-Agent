@@ -50,6 +50,8 @@ def load_state(cfg: AppConfig) -> PaperState:
             for ticker, values in (raw.get("mid_history") or {}).items()
         },
         daily_realized=float(raw.get("daily_realized", 0.0)),
+        pending_orders=[dict(row) for row in (raw.get("pending_orders") or []) if isinstance(row, dict)],
+        swing_highs={str(k): float(v) for k, v in (raw.get("swing_highs") or {}).items()},
     )
     for ticker, pos in (raw.get("positions") or {}).items():
         state.positions[ticker] = Position(
@@ -102,6 +104,11 @@ def save_state(cfg: AppConfig, state: PaperState) -> None:
         "last_trade": {
             ticker: {"contracts": last.contracts, "lost": last.lost}
             for ticker, last in state.last_trade.items()
+        },
+        "pending_orders": [dict(row) for row in (state.pending_orders or [])],
+        "swing_highs": {
+            ticker: float(px)
+            for ticker, px in (state.swing_highs or {}).items()
         },
     }
     path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n")
@@ -156,4 +163,61 @@ def apply_fill(
         state.positions[ticker] = pos
     # Martingale guard keys off a closed losing lot, not the opening fee.
     state.last_trade[ticker] = LastTickerTrade(contracts=contracts, lost=realized < 0)
+    if pos.contracts > 0:
+        peak = state.swing_highs.get(ticker, fill_price)
+        state.swing_highs[ticker] = max(float(peak), float(fill_price))
+    else:
+        state.swing_highs.pop(ticker, None)
     return realized_delta
+
+
+def make_pending(
+    *,
+    order_id: str,
+    ticker: str,
+    side: str,
+    price: float,
+    contracts: int,
+    paper: bool,
+    event_name: str = "",
+    match_id: str = "",
+    thesis: str = "",
+    live_mid: float = 0.0,
+    yes_bid: float = 0.0,
+    yes_ask: float = 0.0,
+    edge_cents: float = 0.0,
+    edge_bps: float = 0.0,
+    filled_so_far: int = 0,
+) -> dict:
+    return {
+        "order_id": str(order_id),
+        "ticker": str(ticker),
+        "side": str(side),
+        "price": float(price),
+        "contracts": int(contracts),
+        "filled_so_far": int(filled_so_far),
+        "paper": bool(paper),
+        "event_name": event_name,
+        "match_id": match_id,
+        "thesis": thesis,
+        "live_mid": float(live_mid),
+        "yes_bid": float(yes_bid),
+        "yes_ask": float(yes_ask),
+        "edge_cents": float(edge_cents),
+        "edge_bps": float(edge_bps),
+        "time_in_force": "good_till_canceled",
+    }
+
+
+def park_pending(state: PaperState, row: dict) -> dict:
+    pending = list(state.pending_orders or [])
+    pending.append(dict(row))
+    state.pending_orders = pending
+    return row
+
+
+def drop_pending(state: PaperState, order_id: str) -> None:
+    oid = str(order_id)
+    state.pending_orders = [
+        row for row in (state.pending_orders or []) if str(row.get("order_id")) != oid
+    ]

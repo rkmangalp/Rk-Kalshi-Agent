@@ -102,6 +102,8 @@ class Signal:
     last_price: float
     fair_yes: float
     pair_lock: bool = False
+    time_in_force: str = ""
+    resting: bool = False
 
 
 @dataclass
@@ -184,6 +186,8 @@ class PaperState:
     mid_history: dict[str, list[float]] = field(default_factory=dict)
     last_trade: dict[str, LastTickerTrade] = field(default_factory=dict)
     daily_realized: float = 0.0
+    pending_orders: list[dict] = field(default_factory=list)
+    swing_highs: dict[str, float] = field(default_factory=dict)
 
     def position(self, ticker: str) -> Position:
         return self.positions.get(ticker, Position())

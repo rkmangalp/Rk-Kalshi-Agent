@@ -66,8 +66,11 @@
           Live losses are real. Hard caps (cannot be raised in the live path):
           max <strong>$20</strong> per trade by default (hard ceiling <strong>$20</strong>),
           daily loss kill-switch default <strong>$20</strong>.
-          Live sizes each new order to the dollar cap. After a YES fill it can
-          sell YES (buy NO) to lock a profit when the pair still pays under $1.
+          Live sizes each new order to the dollar cap. After a YES fill, as_obi/hybrid
+          can sell YES (buy NO) to lock a profit when the pair still pays under $1.
+          Tennis swing instead buys a dumped cheap YES as a <strong>GTC</strong> (rests on
+          kalshi.com Orders), then sells that same contract after a bounce — one order
+          at a time. IOC research orders often never rest.
           <code>can_size_up</code> stays locked. Never paste API keys in this UI or in chat.
           Paper mode stays the default until you switch to Live, Connect, and confirm.
           Switch back to <strong>Paper</strong> to disarm. Clear on this desk is
@@ -97,7 +100,9 @@
     <p class="fine" id="live-trades-note">
       This panel is your real Kalshi balance, <strong>open</strong> positions,
       fills, and orders. Executed YES+NO pair-locks and settled markets are
-      <strong>cash</strong> — they do not appear under Positions. On kalshi.com
+      <strong>cash</strong> — they do not appear under Positions. Tennis swing GTC
+      bids/asks should show here and on kalshi.com <strong>Orders</strong> until they
+      fill; then check <strong>History</strong>. On kalshi.com
       use <strong>History</strong> (Positions and Orders are open/resting only).
       Paper journal stays on the Paper desk.
     </p>
@@ -260,10 +265,11 @@
           <option value="as_obi">Avellaneda–Stoikov + OBI (local)</option>
           <option value="hybrid" selected>Hybrid: AS filter + ChatGPT confirm</option>
           <option value="llm">ChatGPT research (slow)</option>
+          <option value="swing">Tennis swing: buy dump, sell bounce (GTC)</option>
         </select>
       </label>
       <p class="fine" id="trade-style-hint">Balanced mid-high — 2 contracts, 3¢ edge, $10/trade, 8¢ max spread, faster polls.</p>
-      <p class="fine" id="signal-mode-hint">Hybrid/LLM read OPENAI_API_KEY from a local .env only — never paste keys here. ChatGPT is asked to anticipate score/momentum swings, not just restate odds. Research is not a guaranteed edge.</p>
+      <p class="fine" id="signal-mode-hint">Hybrid/LLM read OPENAI_API_KEY from a local .env only — never paste keys here. ChatGPT is asked to anticipate score/momentum swings, not just restate odds. Research is not a guaranteed edge. Tennis swing skips ChatGPT, uses the price path (Kalshi has no serve/score feed), and posts one GTC buy then one GTC sell.</p>
       <label class="inline live-toggle">
         <input type="checkbox" id="live-matches-only" checked>
         Live tennis matches only (in-play)
@@ -438,6 +444,31 @@
 
   <section class="panel paper-only" id="paper-fills-panel">
     <div class="panel-head">
+      <h2>Resting GTC</h2>
+      <span class="muted" id="pending-meta">this desk · not yet filled</span>
+    </div>
+    <p class="fine">
+      Swing (and any GTC) parks one buy or sell at a time. Live resting orders
+      also appear on kalshi.com Orders until they fill or you cancel.
+    </p>
+    <div class="table-wrap">
+      <table id="pending-table">
+        <thead>
+          <tr>
+            <th>ticker</th>
+            <th>side</th>
+            <th class="num">limit</th>
+            <th class="num">contracts</th>
+            <th>tif</th>
+            <th>event_name</th>
+          </tr>
+        </thead>
+        <tbody id="pending-body">
+          <tr><td colspan="6" class="empty">No resting GTC on this desk.</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="panel-head" style="margin-top:1.25rem">
       <h2>Paper fills</h2>
       <span class="muted" id="fills-meta">local clock · newest first</span>
     </div>
@@ -500,8 +531,9 @@
         <p class="fine live-warning">
           REAL MONEY. Hard caps: max <strong>$20</strong>/trade default
           (ceiling <strong>$20</strong>), daily loss default <strong>$20</strong>
-          (ceiling <strong>$25</strong>). Live sizes to the $ cap; after a YES
-          fill it can sell YES (buy NO) to lock a profit. <code>can_size_up</code> stays locked.
+          (ceiling <strong>$25</strong>). Live sizes to the $ cap; as_obi/hybrid can
+          pair-lock a YES then NO. Tennis swing posts one GTC buy then one GTC sell
+          on the same contract so the order can rest on Kalshi. <code>can_size_up</code> stays locked.
         </p>
       </div>
       <p class="fine error" id="desk-gate-error" hidden></p>
@@ -512,6 +544,6 @@
     </div>
   </div>
 
-  <script src="/static/app.js?v=desk5"></script>
+  <script src="/static/app.js?v=desk6"></script>
 </body>
 </html>

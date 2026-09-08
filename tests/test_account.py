@@ -331,6 +331,18 @@ class FakeSignedClient:
             raise AccountApiError(LIVE_TRADING_MESSAGE)
         return {"order_id": order_id, "reduced_by": "0.00", "ts_ms": 1}, 1.0
 
+    def get_order(self, order_id):
+        last = self.created_orders[-1] if self.created_orders else {}
+        contracts = last.get("contracts", 1)
+        price = last.get("price", 0.5)
+        return {
+            "order_id": order_id,
+            "status": "executed",
+            "fill_count": f"{float(contracts):.2f}",
+            "remaining_count": "0.00",
+            "average_fill_price": f"{float(price):.4f}",
+        }, 1.0
+
 
 class SignedClientHttpTests(unittest.TestCase):
     def test_signed_get_sends_headers_and_rejects_post(self):
@@ -406,6 +418,36 @@ class SignedClientHttpTests(unittest.TestCase):
         self.assertEqual(seen["method"], "POST")
         self.assertTrue(seen["url"].endswith("/portfolio/events/orders"))
         self.assertIn("bid", seen["body"].decode("utf-8"))
+
+    def test_signed_get_order_uses_portfolio_path(self):
+        key = _rsa_key()
+        creds = _creds(key)
+        seen = {}
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            seen["method"] = request.method
+            seen["url"] = str(request.url)
+            path = "/trade-api/v2/portfolio/orders/ord-9"
+            _verify(
+                key,
+                request.headers["KALSHI-ACCESS-TIMESTAMP"],
+                "GET",
+                path,
+                request.headers["KALSHI-ACCESS-SIGNATURE"],
+            )
+            return httpx.Response(
+                200,
+                json={"order": {"order_id": "ord-9", "status": "resting", "fill_count": "0.00"}},
+            )
+
+        http = httpx.Client(transport=httpx.MockTransport(handler), base_url=DEMO_BASE_URL)
+        client = KalshiSignedClient(creds, client=http)
+        payload, latency_ms = client.get_order("ord-9")
+        self.assertEqual(payload["order_id"], "ord-9")
+        self.assertEqual(payload["status"], "resting")
+        self.assertGreaterEqual(latency_ms, 0.0)
+        self.assertEqual(seen["method"], "GET")
+        self.assertTrue(seen["url"].endswith("/portfolio/orders/ord-9"))
 
     def test_unauthorized_is_sanitized(self):
         creds = _creds()

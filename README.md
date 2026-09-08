@@ -6,10 +6,11 @@ opt-in from the dashboard after Connect (local `.env` credentials) and a
 real-money confirmation. Connecting by itself does **not** send orders.
 
 The paper signal is **Avellaneda–Stoikov reservation price + order-book
-imbalance**, after Kalshi fees and spread. Hybrid / ChatGPT research may
-inform signals; **risk gates always win**. This is **not financial advice**,
-**not** a match-winner or Bitcoin price model, and there is **no guaranteed
-profitable edge**. **Live losses are real.**
+imbalance**, after Kalshi fees and spread. **Tennis swing** is a separate
+mode: buy a dumped cheap YES, wait for a bounce, sell the same contract.
+Hybrid / ChatGPT research may inform as_obi signals; **risk gates always win**.
+This is **not financial advice**, **not** a match-winner or Bitcoin price
+model, and there is **no guaranteed profitable edge**. **Live losses are real.**
 
 Kalshi tennis contracts are binary YES/NO event contracts (typically “player X
 wins the match”). Bankroll target is about **$100**. Job-hunt / JobPilot code
@@ -264,6 +265,10 @@ field on the dashboard. In `config.yaml` (or the Start panel):
 - `signal.mode: hybrid` — AS+OBI proposes; ChatGPT confirms/skips with
   forward-looking (anticipation) research (default in `config.yaml`)
 - `signal.mode: llm` — ChatGPT proposes paper buy/sell (still fee- and risk-gated)
+- `signal.mode: swing` — tennis-only dump/bounce: buy the cheap YES after a
+  sharp dump (about 12–42¢), rest a **GTC** bid, wait if the mid is still
+  making highs, then sell that same contract after ~10¢ of bounce (or a 4¢
+  pullback from the peak). One buy or sell at a time. Skips ChatGPT.
 
 Default model is `gpt-4o-mini` (`signal.llm_model`). Calls are rate-limited
 (`llm_min_interval_s`). In hybrid/llm the model is asked to anticipate near-term
@@ -272,6 +277,11 @@ YES/NO mid moves — not just restate the current odds. That research is
 **advisory**, **slow** versus the book, costs API tokens, and is **not** a
 guaranteed edge or a match predictor. On the live path those research notes
 still cannot bypass risk caps, the daily kill-switch, or `allow_size_up: false`.
+
+Kalshi does **not** publish who is serving or the live score on the public or
+trade API. Swing mode reads player names from the market title / event name and
+uses the YES mid path as the only point-by-point proxy. It is not a match
+predictor.
 
 Start-panel trading modes (paper knobs only): **Safe**, **Conservative**,
 **Active** (default), **Aggressive**.
@@ -293,7 +303,7 @@ Defaults live in `config.yaml`:
 | `signal.kappa` | `1.5` | Order-book imbalance weight (`obi_weight` alias) |
 | `signal.sigma_floor` | `0.04` | Minimum mid volatility in probability space |
 | `signal.use_ema_fallback` | `false` | Optional last-print / EMA fair when OBI and inventory are idle |
-| `signal.mode` | `hybrid` | `as_obi` (local default in code), `hybrid`, or `llm` (ChatGPT; key from `.env`) |
+| `signal.mode` | `hybrid` | `as_obi` (local default in code), `hybrid`, `llm` (ChatGPT; key from `.env`), or `swing` (tennis dump-bounce GTC) |
 | `signal.llm_model` | `gpt-4o-mini` | OpenAI model for llm/hybrid paper research (`gpt-4.1-mini` also fine) |
 | `signal.llm_min_interval_s` | `20` | Minimum seconds between ChatGPT calls |
 | `signal.llm_max_markets_per_call` | `6` | Cap markets sent to ChatGPT per cycle |
@@ -339,7 +349,7 @@ Paper stays the default and stays selectable. Live is a separate desk
 4. Pick one category + match (Active + Hybrid is fine). Start.
 
 Both desks share the same controls (category → match, Safe · Conservative ·
-Active · Aggressive, as_obi / hybrid / llm, Start / Stop / Clear, bankroll /
+Active · Aggressive, as_obi / hybrid / llm / swing, Start / Stop / Clear, bankroll /
 max $/trade / daily loss). Paper uses the paper journal and simulated cash.
 Live uses the connected Kalshi balance, hard caps, and Live account view.
 
@@ -347,18 +357,25 @@ Live posts Kalshi **Create Order V2**:
 `POST /trade-api/v2/portfolio/events/orders` with RSA-PSS headers already
 used for account reads (`timestamp_ms + METHOD + path`, path only). Body
 uses `side` `bid`/`ask`, fixed-point `count`/`price`,
-`time_in_force=immediate_or_cancel`, `self_trade_prevention_type=taker_at_cross`.
+`self_trade_prevention_type=taker_at_cross`. **as_obi / hybrid / llm** use
+`time_in_force=immediate_or_cancel` (often fills or cancels immediately — it
+may never rest on kalshi.com). **Tennis swing** uses
+`time_in_force=good_till_canceled` so the buy can sit on the book at the dump
+price and the later sell can sit at the bounce target. You should see that
+resting order under **Orders** on kalshi.com until it fills, then the cover.
 Cancel uses `DELETE /portfolio/events/orders/{order_id}` when Stop or the
-kill-switch hits a resting remainder.
+kill-switch hits a resting remainder. Swing reconciles resting orders with
+`GET /portfolio/orders/{order_id}`.
 
 **Non-bypassable live caps** (code, not YAML):
 
 - Max **$20** per trade/ticker by default; UI/style values above **$20** are
   clamped to $20. **Live entries size up to that cap** (not paper’s 1–2
   contracts). Flattening the other side does not use the entry cap.
-- After a live YES fill, the bot can **sell YES / buy NO** on the same ticker
+- After a live YES fill, as_obi/hybrid can **sell YES / buy NO** on the same ticker
   when entry + other-side + fees still pay under $1 (pair-lock). ChatGPT
-  cannot skip that cover.
+  cannot skip that cover. Swing mode does **not** pair-lock; it sells the same
+  YES it bought after a bounce (one live order/position at a time).
 - Daily loss kill-switch default **$20** (hard ceiling $25). New live orders
   stop for the UTC day.
 - `allow_size_up: false` and no martingale, even if config is flipped.

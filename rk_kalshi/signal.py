@@ -21,6 +21,7 @@ from typing import Any
 from rk_kalshi.config import AppConfig
 from rk_kalshi.fees import quadratic_fee_cents, quadratic_fee_dollars
 from rk_kalshi.models import MarketSnapshot, PaperState, Position, Signal
+from rk_kalshi.swing import SWING_ALGORITHM, evaluate_swing
 
 SIGNAL_ALGORITHM = "Avellaneda–Stoikov + order-book imbalance"
 SIGNAL_DISCLAIMER = (
@@ -36,6 +37,8 @@ def algorithm_label(mode: str | None) -> str:
         return "ChatGPT research (paper)"
     if text == "hybrid":
         return "Hybrid AS+OBI + ChatGPT"
+    if text == "swing":
+        return SWING_ALGORITHM
     return SIGNAL_ALGORITHM
 
 
@@ -108,12 +111,15 @@ class SignalEngine:
         now: float | None = None,
     ) -> list[Signal]:
         now = time.time() if now is None else now
+        if str(self.cfg.signal_mode or "").strip().lower() == "swing":
+            return self._evaluate_swing(markets, inventory, now)
         signals: list[Signal] = []
         for market in markets:
             signal = self.evaluate_one(
                 market,
                 inventory_q=self._inventory_q(market.ticker, inventory),
                 now=now,
+                inventory=inventory,
             )
             if signal is not None:
                 signals.append(signal)
@@ -336,6 +342,64 @@ class SignalEngine:
         except (TypeError, ValueError):
             qty = 0
         return Position(contracts=qty, avg_price=0.0)
+
+    def _evaluate_swing(
+        self,
+        markets: list[MarketSnapshot],
+        inventory: Mapping[str, Any] | PaperState | None,
+        now: float,
+    ) -> list[Signal]:
+        state = inventory if isinstance(inventory, PaperState) else None
+        pending_by_ticker: dict[str, dict[str, Any]] = {}
+        busy: set[str] = set()
+        highs: dict[str, float]
+        if state is not None:
+            highs = state.swing_highs
+            for row in state.pending_orders or []:
+                ticker = str(row.get("ticker") or "")
+                if ticker:
+                    pending_by_ticker[ticker] = row
+                    busy.add(ticker)
+            for ticker, pos in state.positions.items():
+                if pos.contracts:
+                    busy.add(ticker)
+        else:
+            highs = {}
+            pos_map = inventory if isinstance(inventory, Mapping) else {}
+            for ticker, pos in pos_map.items():
+                qty = pos.contracts if isinstance(pos, Position) else pos
+                try:
+                    if int(float(qty)) != 0:
+                        busy.add(str(ticker))
+                except (TypeError, ValueError):
+                    continue
+
+        tennis = [m for m in markets if m.asset_class == "tennis"]
+        for market in tennis:
+            mid = market.yes_mid
+            if mid is not None:
+                self._record_mid(market.ticker, mid)
+            elif market.yes_bid > 0 and self._position(market.ticker, inventory).contracts > 0:
+                self._record_mid(market.ticker, float(market.yes_bid))
+
+        ordered = sorted(tennis, key=lambda m: 0 if m.ticker in busy else 1)
+        out: list[Signal] = []
+        for market in ordered:
+            pos = self._position(market.ticker, inventory)
+            blocked = bool(busy) and market.ticker not in busy
+            signal = evaluate_swing(
+                market,
+                mids=list(self._mids.get(market.ticker) or []),
+                position=pos,
+                pending=pending_by_ticker.get(market.ticker),
+                cfg=self.cfg,
+                blocked=blocked,
+                swing_highs=highs,
+            )
+            if signal is not None:
+                out.append(signal)
+                break
+        return out
 
     @staticmethod
     def _inventory_q(ticker: str, inventory: Mapping[str, Any] | PaperState | None) -> float:

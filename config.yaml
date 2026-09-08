@@ -60,6 +60,7 @@ signal:
   # Optional last-print / EMA fair when inventory and OBI are both idle.
   use_ema_fallback: false
   # as_obi | hybrid (AS filters, ChatGPT confirms; default for research) | llm
+  # | swing (tennis dump-bounce GTC; skips ChatGPT; one buy then one sell)
   mode: hybrid
   llm_model: gpt-4o-mini
   llm_min_interval_s: 20
@@ -75,6 +76,17 @@ signal:
   live_matches_only: true
   live_pre_start_minutes: 10
   live_max_hours: 12
+  # Tennis swing (signal.mode: swing). Buy the dumped cheap YES, trail bounce.
+  # Kalshi does not publish serve/score; this uses the YES mid path only.
+  swing_buy_low: 0.12
+  swing_buy_high: 0.42
+  swing_min_dump_cents: 18
+  swing_min_range_cents: 22
+  swing_target_cents: 10
+  swing_trail_cents: 4
+  swing_max_hold_cents: 25
+  swing_lookback: 16
+  swing_max_spread_cents: 16
 
 paper:
   fill_log_csv: data/fills.csv

@@ -21,12 +21,14 @@ from rk_kalshi.fees import quadratic_fee_dollars
 # Documented Kalshi Trade API v2 event-order paths (relative to /trade-api/v2).
 CREATE_ORDER_PATH = "/portfolio/events/orders"
 CANCEL_ORDER_PATH = "/portfolio/events/orders/{order_id}"
+GET_ORDER_PATH = "/portfolio/orders/{order_id}"
 
 LIVE_MAX_DOLLARS_DEFAULT = 20.0
 LIVE_MAX_DOLLARS_HARD_CEILING = 20.0
 LIVE_DAILY_LOSS_DEFAULT = 20.0
 LIVE_DAILY_LOSS_HARD_CEILING = 25.0
 LIVE_TIME_IN_FORCE = "immediate_or_cancel"
+LIVE_TIME_IN_FORCE_GTC = "good_till_canceled"
 LIVE_SELF_TRADE_PREVENTION = "taker_at_cross"
 
 LIVE_DISABLED_MESSAGE = (
@@ -106,6 +108,17 @@ def max_contracts_for_cap(
     return 0
 
 
+def is_gtc_signal(signal: object) -> bool:
+    tif = str(getattr(signal, "time_in_force", "") or "").strip().lower().replace("-", "_")
+    if bool(getattr(signal, "resting", False)):
+        return True
+    return tif in {"good_till_canceled", "gtc", "good_til_canceled", "good_till_cancelled"}
+
+
+def resting_limit_price(price: float) -> float:
+    return round(min(max(float(price), 0.01), 0.99), 2)
+
+
 def live_limit_price(side: str, yes_bid: float, yes_ask: float, fallback: float) -> float:
     """Aggressive take: buy YES at ask, sell YES at bid (V2 book is YES-only)."""
     if str(side).lower() == "buy":
@@ -154,6 +167,10 @@ def cancel_order_path(order_id: str) -> str:
     return CANCEL_ORDER_PATH.format(order_id=str(order_id))
 
 
+def get_order_path(order_id: str) -> str:
+    return GET_ORDER_PATH.format(order_id=str(order_id))
+
+
 def require_live_credentials(credentials: KalshiCredentials | None, environ: dict[str, str] | None = None) -> KalshiCredentials:
     """Refuse live start when keys are missing or demo/prod is ambiguous."""
     if credentials is None:
@@ -187,6 +204,7 @@ def live_caps_payload() -> dict[str, Any]:
         "allow_size_up": False,
         "allow_martingale": False,
         "time_in_force": LIVE_TIME_IN_FORCE,
+        "swing_time_in_force": LIVE_TIME_IN_FORCE_GTC,
         "create_order_path": CREATE_ORDER_PATH,
         "warning": (
             "Live losses are real. Caps cannot be raised past the hard ceiling. "
