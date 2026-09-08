@@ -20,13 +20,14 @@ from typing import Any
 
 from rk_kalshi.config import AppConfig
 from rk_kalshi.fees import quadratic_fee_cents, quadratic_fee_dollars
-from rk_kalshi.models import MarketSnapshot, PaperState, Signal
+from rk_kalshi.models import MarketSnapshot, PaperState, Position, Signal
 
 SIGNAL_ALGORITHM = "Avellaneda–Stoikov + order-book imbalance"
 SIGNAL_DISCLAIMER = (
     "Not financial advice and not a match or Bitcoin predictor. "
     "There is no guaranteed profitable model; REST paper fills audit costs and risk."
 )
+PAIR_LOCK_MIN_CENTS = 1.0
 
 
 def algorithm_label(mode: str | None) -> str:
@@ -116,7 +117,7 @@ class SignalEngine:
             )
             if signal is not None:
                 signals.append(signal)
-        signals.sort(key=lambda s: s.edge_cents, reverse=True)
+        signals.sort(key=lambda s: (not s.pair_lock, -s.edge_cents))
         return signals
 
     def evaluate_one(
@@ -127,9 +128,18 @@ class SignalEngine:
         inventory: Mapping[str, Any] | PaperState | None = None,
     ) -> Signal | None:
         now = time.time() if now is None else now
+        pos = self._position(market.ticker, inventory, inventory_q)
         if inventory is not None:
-            inventory_q = self._inventory_q(market.ticker, inventory)
+            inventory_q = float(pos.contracts)
         mid = market.yes_mid
+        lock_mid = mid if mid is not None else max(float(market.yes_bid), float(market.yes_ask), 0.01)
+        lock = self._pair_lock(market, pos, lock_mid)
+        if lock is not None:
+            return lock
+        if self.cfg.live_enabled and pos.contracts != 0:
+            # Live holds the open until a profitable other-side flatten (or settlement).
+            return None
+
         half_spread = market.half_spread
         if mid is None or half_spread is None:
             return None
@@ -220,6 +230,67 @@ class SignalEngine:
             fair_yes=fair,
         )
 
+    def _pair_lock(self, market: MarketSnapshot, pos: Position, mid: float) -> Signal | None:
+        """Flatten when YES+NO (entry + other side) locks a profit after fees.
+
+        Manual tape this copies: buy YES on a tennis winner, then buy NO / sell YES
+        when the complementary price is cheap enough that the pair pays $1.
+        V2 quotes the YES book: selling YES at the bid is buying NO at 1 - bid.
+        """
+        held = int(pos.contracts)
+        avg = float(pos.avg_price)
+        if held == 0 or avg <= 0:
+            return None
+        contracts = abs(held)
+        if held > 0:
+            exit_px = float(market.yes_bid) if market.yes_bid > 0 else 0.0
+            side = "sell"
+            gross = exit_px - avg
+            no_px = 1.0 - exit_px
+        else:
+            exit_px = float(market.yes_ask) if market.yes_ask > 0 else 0.0
+            side = "buy"
+            gross = avg - exit_px
+            no_px = exit_px
+        if exit_px < 0.01 or exit_px > 0.99:
+            return None
+        fee = quadratic_fee_dollars(
+            exit_px,
+            contracts,
+            self.cfg.fee_coefficient,
+            self.cfg.fee_multiplier,
+        )
+        fee_each = fee / contracts
+        net_each = gross - fee_each
+        if net_each * 100.0 < PAIR_LOCK_MIN_CENTS:
+            return None
+        edge = net_each * 100.0
+        thesis = (
+            f"PAIR LOCK {side.upper()} YES {market.ticker}: flatten {contracts} at "
+            f"{exit_px * 100:.2f}¢ vs entry {avg * 100:.2f}¢ "
+            f"(other side ~{no_px * 100:.2f}¢; pair {avg * 100:.2f}¢ + {no_px * 100:.2f}¢). "
+            f"Lock {gross * 100:.2f}¢/ct before exit fee {fee_each * 100:.2f}¢; "
+            f"net {edge:.2f}¢/ct after fees. Not financial advice; not a match pick."
+        )
+        return Signal(
+            ticker=market.ticker,
+            event_name=market.event_name,
+            match_id=market.match_id,
+            side=side,
+            live_mid=mid,
+            fill_price=exit_px,
+            edge_cents=edge,
+            edge_bps=edge * 100.0,
+            edge_thesis=thesis,
+            fee_per_contract=fee_each,
+            contracts=contracts,
+            yes_bid=market.yes_bid,
+            yes_ask=market.yes_ask,
+            last_price=market.last_price,
+            fair_yes=exit_px,
+            pair_lock=True,
+        )
+
     def _record_mid(self, ticker: str, mid: float) -> None:
         window = max(int(self.cfg.sigma_window), 2)
         buf = self._mids.get(ticker)
@@ -245,18 +316,30 @@ class SignalEngine:
         return ema, "last=n/a (missing or stale vs mid)"
 
     @staticmethod
-    def _inventory_q(ticker: str, inventory: Mapping[str, Any] | PaperState | None) -> float:
-        if inventory is None:
-            return 0.0
+    def _position(
+        ticker: str,
+        inventory: Mapping[str, Any] | PaperState | None,
+        inventory_q: float = 0.0,
+    ) -> Position:
         if isinstance(inventory, PaperState):
-            return float(inventory.position(ticker).contracts)
-        pos = inventory.get(ticker, 0) if isinstance(inventory, Mapping) else 0
-        if hasattr(pos, "contracts"):
-            return float(pos.contracts)
+            return inventory.position(ticker)
+        if isinstance(inventory, Mapping):
+            pos = inventory.get(ticker, 0)
+            if isinstance(pos, Position):
+                return pos
+            try:
+                return Position(contracts=int(float(pos)), avg_price=0.0)
+            except (TypeError, ValueError):
+                return Position()
         try:
-            return float(pos)
+            qty = int(float(inventory_q))
         except (TypeError, ValueError):
-            return 0.0
+            qty = 0
+        return Position(contracts=qty, avg_price=0.0)
+
+    @staticmethod
+    def _inventory_q(ticker: str, inventory: Mapping[str, Any] | PaperState | None) -> float:
+        return float(SignalEngine._position(ticker, inventory).contracts)
 
 
 # Back-compat alias used by older imports and docs.

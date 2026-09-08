@@ -3,13 +3,15 @@
 Sizing up stays locked unless allow_size_up is on, fill count is large,
 and paper P&L is already positive. Defaults keep that gate closed.
 Live path clamps dollar/daily-loss caps to hard ceilings in live_caps.
+Live new entries size to that dollar cap (not paper base_contracts).
+Flattening the other side to lock a profit is allowed at full position size.
 """
 
 from __future__ import annotations
 
 from rk_kalshi.config import AppConfig
 from rk_kalshi.fees import quadratic_fee_dollars
-from rk_kalshi.live_caps import clamp_live_daily_loss, clamp_live_dollars
+from rk_kalshi.live_caps import clamp_live_daily_loss, clamp_live_dollars, max_contracts_for_cap
 from rk_kalshi.models import PaperState, RiskDecision, Signal
 
 
@@ -57,14 +59,27 @@ class RiskManager:
         if requested <= 0:
             return RiskDecision(False, "non-positive size")
 
+        pos = state.position(signal.ticker)
+        reducing = _is_reducing(signal.side, pos.contracts)
         last = state.last_trade.get(signal.ticker)
-        if last and last.lost and requested > last.contracts:
+        if last and last.lost and requested > last.contracts and not reducing:
             return RiskDecision(False, "martingale forbidden: will not increase size after a loss")
 
-        if not self.can_size_up(state):
+        price = signal.fill_price
+        if reducing:
+            held = abs(int(pos.contracts))
+            requested = min(max(requested, 1), held)
+        elif self.cfg.live_enabled:
+            # Live entries use the dollar cap, not paper base_contracts (1–4).
+            requested = max_contracts_for_cap(
+                price,
+                self.max_dollars_per_ticker(),
+                fee_coefficient=self.cfg.fee_coefficient,
+                fee_multiplier=self.cfg.fee_multiplier,
+            )
+        elif not self.can_size_up(state):
             requested = min(requested, self.cfg.base_contracts)
 
-        price = signal.fill_price
         ticker_cap = self.max_dollars_per_ticker()
         contracts = requested
         while contracts > 0:
@@ -76,7 +91,7 @@ class RiskManager:
             )
             order_notional = contracts * price + fee
             existing = _signed_exposure(state, signal.ticker, price, signal.side, contracts)
-            if existing > ticker_cap + 1e-9:
+            if not reducing and existing > ticker_cap + 1e-9:
                 contracts -= 1
                 continue
             if signal.side == "buy" and state.cash + 1e-9 < order_notional:
@@ -85,6 +100,14 @@ class RiskManager:
             return RiskDecision(True, "ok", contracts)
 
         return RiskDecision(False, "ticker or cash cap: cannot size a fill under max_dollars_per_ticker")
+
+
+def _is_reducing(side: str, held: int) -> bool:
+    if held > 0 and str(side).lower() == "sell":
+        return True
+    if held < 0 and str(side).lower() == "buy":
+        return True
+    return False
 
 
 def _signed_exposure(

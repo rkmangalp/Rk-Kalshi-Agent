@@ -208,19 +208,25 @@ class LiveKalshiExecution:
         if int(contracts) <= 0:
             raise LiveOrderRejected("non-positive live size")
         price = live_limit_price(signal.side, signal.yes_bid, signal.yes_ask, signal.fill_price)
-        cap = clamp_live_dollars(self.cfg.max_dollars_per_ticker)
-        capped = max_contracts_for_cap(
-            price,
-            cap,
-            fee_coefficient=self.cfg.fee_coefficient,
-            fee_multiplier=self.cfg.fee_multiplier,
-            base_contracts=min(int(contracts), int(self.cfg.base_contracts)),
-        )
+        held = int(state.position(signal.ticker).contracts)
+        reducing = (held > 0 and signal.side == "sell") or (held < 0 and signal.side == "buy")
+        if reducing:
+            capped = min(int(contracts), abs(held))
+        else:
+            cap = clamp_live_dollars(self.cfg.max_dollars_per_ticker)
+            capped = max_contracts_for_cap(
+                price,
+                cap,
+                fee_coefficient=self.cfg.fee_coefficient,
+                fee_multiplier=self.cfg.fee_multiplier,
+                max_contracts=int(contracts),
+            )
         if capped <= 0:
             raise LiveOrderRejected("live dollar cap: cannot size an order under the hard ceiling")
-        exposure = abs(state.position(signal.ticker).contracts + (capped if signal.side == "buy" else -capped)) * price
-        if exposure > cap + 1e-9:
-            raise LiveOrderRejected("live ticker cap would be exceeded")
+        if not reducing:
+            exposure = abs(state.position(signal.ticker).contracts + (capped if signal.side == "buy" else -capped)) * price
+            if exposure > clamp_live_dollars(self.cfg.max_dollars_per_ticker) + 1e-9:
+                raise LiveOrderRejected("live ticker cap would be exceeded")
         body = create_order_v2_body(
             ticker=signal.ticker,
             side=signal.side,

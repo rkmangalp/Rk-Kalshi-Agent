@@ -103,8 +103,9 @@
   const LIVE_LEDE =
     "Same controls as Paper — category, live match, Safe · Conservative · Active · Aggressive, "
     + "and as_obi / hybrid / llm research — but this desk spends <strong>real Kalshi cash</strong>. "
-    + "Bankroll is your connected balance; max $/trade and daily loss are hard-capped. "
-    + "Hybrid / ChatGPT may inform signals; <strong>risk gates always win</strong>. "
+    + "Bankroll is your connected balance; max $/trade sizes the order (not 1–2 contracts) and daily loss is hard-capped. "
+    + "After a YES fill, the bot can sell YES (buy NO) when that round-trip locks a profit after fees. "
+    + "Hybrid / ChatGPT may inform new entries; <strong>pair-lock covers and risk gates always win</strong>. "
     + "<strong>Not financial advice</strong>. There is <strong>no guaranteed profitable model</strong>. "
     + "<code>can_size_up</code> stays locked. Stop ends polling and cancels open orders from this desk. "
     + "<strong>Clear view</strong> wipes this screen’s log only — not cancel-all. "

@@ -121,6 +121,44 @@ class RiskTests(unittest.TestCase):
         self.state.cash = 80.0
         self.assertTrue(self.risk.kill_switch_hit(self.state, {"X": 0.10}))
 
+    def test_paper_still_clips_to_base_contracts(self):
+        decision = self.risk.approve(_signal(contracts=20, fill_price=0.40), self.state)
+        self.assertTrue(decision.ok)
+        self.assertEqual(decision.contracts, 1)
+
+    def test_live_sizes_new_entry_to_dollar_cap(self):
+        cfg = AppConfig(
+            live_enabled=True,
+            max_dollars_per_ticker=20.0,
+            base_contracts=2,
+            starting_cash=100.0,
+            allow_size_up=False,
+        )
+        risk = RiskManager(cfg)
+        state = new_state(cfg, day="2026-09-06")
+        decision = risk.approve(_signal(contracts=2, fill_price=0.53, live_mid=0.53), state)
+        self.assertTrue(decision.ok)
+        self.assertGreater(decision.contracts, 2)
+        self.assertLessEqual(decision.contracts * 0.53, 20.0 + 1e-9)
+
+    def test_pair_lock_cover_is_not_clipped_to_base_or_cap(self):
+        cfg = AppConfig(
+            live_enabled=True,
+            max_dollars_per_ticker=20.0,
+            base_contracts=2,
+            starting_cash=100.0,
+            allow_size_up=False,
+        )
+        risk = RiskManager(cfg)
+        state = new_state(cfg, day="2026-09-06")
+        state.positions["KXATPMATCH-T"] = Position(contracts=62, avg_price=0.53)
+        decision = risk.approve(
+            _signal(side="sell", contracts=62, fill_price=0.81, live_mid=0.82, yes_bid=0.81, yes_ask=0.83),
+            state,
+        )
+        self.assertTrue(decision.ok)
+        self.assertEqual(decision.contracts, 62)
+
     def test_apply_fill_marks_loss_for_martingale_guard(self):
         apply_fill(self.state, "KXATPMATCH-T", "buy", 1, 0.60, fee=0.02)
         apply_fill(self.state, "KXATPMATCH-T", "sell", 1, 0.40, fee=0.02)
