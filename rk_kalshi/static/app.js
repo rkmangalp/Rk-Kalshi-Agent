@@ -72,6 +72,7 @@
     liveFills: $("live-fills"),
     livePosHint: $("live-pos-hint"),
     livePositionsBody: $("live-positions-body"),
+    liveClosedBody: $("live-closed-body"),
     liveFillsBody: $("live-fills-body"),
     liveOrdersBody: $("live-orders-body"),
     deskTitle: $("desk-title"),
@@ -728,6 +729,9 @@
     if (els.liveOrdersBody) {
       els.liveOrdersBody.innerHTML = `<tr><td colspan="7" class="empty">${escapeHtml(message)}</td></tr>`;
     }
+    if (els.liveClosedBody) {
+      els.liveClosedBody.innerHTML = `<tr><td colspan="6" class="empty">${escapeHtml(message)}</td></tr>`;
+    }
     if (els.liveBalance) els.liveBalance.textContent = "—";
     if (els.livePortfolio) els.livePortfolio.textContent = "—";
     if (els.livePositions) els.livePositions.textContent = "0";
@@ -751,11 +755,17 @@
     if (els.livePortfolio) els.livePortfolio.textContent = payload.portfolio_value == null ? "—" : `$${fmt(payload.portfolio_value, 2)}`;
     if (els.livePositions) els.livePositions.textContent = String((payload.counts && payload.counts.positions) || 0);
     if (els.liveFills) els.liveFills.textContent = String((payload.counts && payload.counts.fills) || 0);
-    if (els.livePosHint) els.livePosHint.textContent = "read-only · not paper";
+    if (els.livePosHint) {
+      const closedN = (payload.closed_pairs || []).length;
+      els.livePosHint.textContent = closedN
+        ? `open only · ${closedN} closed pair-lock${closedN === 1 ? "" : "s"} in fills`
+        : "open only · closed trades are fills";
+    }
 
     const positions = payload.positions || [];
     if (!positions.length) {
-      els.livePositionsBody.innerHTML = '<tr><td colspan="7" class="empty">No open Kalshi positions.</td></tr>';
+      els.livePositionsBody.innerHTML =
+        '<tr><td colspan="7" class="empty">No open Kalshi positions. Flattened YES+NO pairs and settled markets are cash — see Closed pair-locks and Recent fills. On kalshi.com use History, not Positions or Orders.</td></tr>';
     } else {
       els.livePositionsBody.innerHTML = positions.map((row) => `
         <tr>
@@ -768,6 +778,25 @@
           <td class="when">${escapeHtml(formatLocalDateTime(row.last_updated))}</td>
         </tr>
       `).join("");
+    }
+
+    const closed = payload.closed_pairs || [];
+    if (els.liveClosedBody) {
+      if (!closed.length) {
+        els.liveClosedBody.innerHTML =
+          '<tr><td colspan="6" class="empty">No flattened YES+NO pairs in recent fills.</td></tr>';
+      } else {
+        els.liveClosedBody.innerHTML = closed.map((row) => `
+          <tr>
+            <td class="ticker">${escapeHtml(row.ticker)}</td>
+            <td class="num">${fmt(row.count, 2)}</td>
+            <td class="num">${fmt(row.bid_yes, 4)}</td>
+            <td class="num">${fmt(row.ask_yes, 4)}</td>
+            <td class="num">${fmt(row.fees, 4)}</td>
+            <td class="num">${fmt(row.locked_pnl, 2)}</td>
+          </tr>
+        `).join("");
+      }
     }
 
     const fills = payload.fills || [];

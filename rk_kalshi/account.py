@@ -10,6 +10,7 @@ import json
 import os
 import threading
 import time
+from collections import defaultdict
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -315,6 +316,58 @@ def parse_order(row: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _is_buy_yes(row: dict[str, Any]) -> bool:
+    book = str(row.get("book_side") or "").lower()
+    if book == "bid":
+        return True
+    if book == "ask":
+        return False
+    return str(row.get("outcome_side") or "").lower() == "yes"
+
+
+def summarize_closed_pairs(fills: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Match bid/YES with ask/NO on the same ticker and count.
+
+    Those round-trips are cash, not an open position. Kalshi Positions /
+    open Orders tabs stay empty; History and Recent fills still show them.
+    """
+    buckets: dict[tuple[str, float], dict[str, list[dict[str, Any]]]] = defaultdict(
+        lambda: {"buys": [], "covers": []}
+    )
+    for row in fills:
+        ticker = str(row.get("ticker") or "")
+        count = round(float(row.get("count") or 0.0), 2)
+        if not ticker or count <= 0:
+            continue
+        key = (ticker, count)
+        if _is_buy_yes(row):
+            buckets[key]["buys"].append(row)
+        else:
+            buckets[key]["covers"].append(row)
+    closed: list[dict[str, Any]] = []
+    for (ticker, count), sides in buckets.items():
+        n = min(len(sides["buys"]), len(sides["covers"]))
+        for index in range(n):
+            buy = sides["buys"][index]
+            cover = sides["covers"][index]
+            bid_px = float(buy.get("yes_price") or 0.0)
+            ask_px = float(cover.get("yes_price") or 0.0)
+            fees = float(buy.get("fee") or 0.0) + float(cover.get("fee") or 0.0)
+            locked = (ask_px - bid_px) * count - fees
+            closed.append(
+                {
+                    "ticker": ticker,
+                    "count": count,
+                    "bid_yes": bid_px,
+                    "ask_yes": ask_px,
+                    "fees": fees,
+                    "locked_pnl": locked,
+                }
+            )
+    closed.sort(key=lambda row: str(row["ticker"]))
+    return closed
+
+
 @dataclass
 class AccountStore:
     path: Path
@@ -612,6 +665,7 @@ class AccountService:
             "positions": positions,
             "fills": fills,
             "orders": orders,
+            "closed_pairs": summarize_closed_pairs(fills),
             "counts": {
                 "positions": len(positions),
                 "fills": len(fills),
@@ -739,6 +793,15 @@ def format_account_cli(portfolio: dict[str, Any] | None, status: dict[str, Any])
             f"  {row.get('ticker')} {row.get('side')} {row.get('contracts')} "
             f"exposure={row.get('exposure')}"
         )
+    closed = portfolio.get("closed_pairs") or []
+    if closed:
+        lines.append(f"closed_pairs: {len(closed)} (cash, not open positions)")
+        for row in closed[:10]:
+            lines.append(
+                f"  {row.get('ticker')} {row.get('count')} "
+                f"YES {row.get('bid_yes')}→{row.get('ask_yes')} "
+                f"locked={row.get('locked_pnl')}"
+            )
     lines.append(f"recent_fills: {portfolio.get('counts', {}).get('fills', 0)}")
     for row in (portfolio.get("fills") or [])[:10]:
         lines.append(

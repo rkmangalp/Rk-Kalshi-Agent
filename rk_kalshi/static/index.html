@@ -95,8 +95,11 @@
       </div>
     </div>
     <p class="fine" id="live-trades-note">
-      This panel is your real Kalshi balance, positions, fills, and orders.
-      It is not the paper fill log. Paper journal stays on the Paper desk.
+      This panel is your real Kalshi balance, <strong>open</strong> positions,
+      fills, and orders. Executed YES+NO pair-locks and settled markets are
+      <strong>cash</strong> — they do not appear under Positions. On kalshi.com
+      use <strong>History</strong> (Positions and Orders are open/resting only).
+      Paper journal stays on the Paper desk.
     </p>
     <section class="summary live-summary" id="account-cards" aria-label="Live account summary">
       <article class="card">
@@ -112,7 +115,7 @@
       <article class="card">
         <h2>Open positions</h2>
         <p class="metric" id="live-positions">0</p>
-        <p class="hint" id="live-pos-hint">read-only</p>
+        <p class="hint" id="live-pos-hint">open only · closed = fills</p>
       </article>
       <article class="card">
         <h2>Recent fills</h2>
@@ -122,6 +125,10 @@
     </section>
     <div class="table-wrap">
       <h3>Open positions</h3>
+      <p class="fine" id="live-pos-explain">
+        Only leftover exposure. A bid/YES and ask/NO for the same count flatten
+        to cash and show under Closed pair-locks and Recent fills.
+      </p>
       <table id="live-positions-table">
         <thead>
           <tr>
@@ -136,6 +143,25 @@
         </thead>
         <tbody id="live-positions-body">
           <tr><td colspan="7" class="empty">Connect to load live positions.</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="table-wrap" id="live-closed-wrap">
+      <h3>Closed pair-locks</h3>
+      <p class="fine">Matched bid/YES + ask/NO on the same ticker and count. These are done — not Positions.</p>
+      <table id="live-closed-table">
+        <thead>
+          <tr>
+            <th>Ticker</th>
+            <th class="num">Count</th>
+            <th class="num">Bid YES</th>
+            <th class="num">Ask YES</th>
+            <th class="num">Fees</th>
+            <th class="num">Locked $</th>
+          </tr>
+        </thead>
+        <tbody id="live-closed-body">
+          <tr><td colspan="6" class="empty">No flattened YES+NO pairs in recent fills.</td></tr>
         </tbody>
       </table>
     </div>
@@ -160,7 +186,8 @@
       </table>
     </div>
     <div class="table-wrap">
-      <h3>Orders</h3>
+      <h3>Recent orders</h3>
+      <p class="fine">Includes <strong>executed</strong> history from the API. kalshi.com’s Orders tab is usually resting-only.</p>
       <table id="live-orders-table">
         <thead>
           <tr>
@@ -485,6 +512,6 @@
     </div>
   </div>
 
-  <script src="/static/app.js?v=desk4"></script>
+  <script src="/static/app.js?v=desk5"></script>
 </body>
 </html>

@@ -22,6 +22,7 @@ from rk_kalshi.account import (
     parse_fill,
     parse_order,
     parse_position,
+    summarize_closed_pairs,
 )
 from rk_kalshi.auth import (
     DEMO_BASE_URL,
@@ -173,6 +174,43 @@ class ParserTests(unittest.TestCase):
         self.assertAlmostEqual(row["contracts"], 3.0)
         no_side = parse_position({"ticker": "Y", "position_fp": "-2.00"})
         self.assertEqual(no_side["side"], "no")
+
+    def test_closed_pairs_match_bid_yes_with_ask_no(self):
+        closed = summarize_closed_pairs(
+            [
+                {
+                    "ticker": "KX-VAN",
+                    "book_side": "bid",
+                    "outcome_side": "yes",
+                    "count": 62.01,
+                    "yes_price": 0.53,
+                    "fee": 1.0813,
+                },
+                {
+                    "ticker": "KX-VAN",
+                    "book_side": "ask",
+                    "outcome_side": "no",
+                    "count": 62.01,
+                    "yes_price": 0.81,
+                    "fee": 0.6681,
+                },
+                {
+                    "ticker": "KX-BTC",
+                    "book_side": "bid",
+                    "outcome_side": "yes",
+                    "count": 935.0,
+                    "yes_price": 0.01,
+                    "fee": 0.65,
+                },
+            ]
+        )
+        self.assertEqual(len(closed), 1)
+        row = closed[0]
+        self.assertEqual(row["ticker"], "KX-VAN")
+        self.assertAlmostEqual(row["count"], 62.01)
+        self.assertAlmostEqual(row["bid_yes"], 0.53)
+        self.assertAlmostEqual(row["ask_yes"], 0.81)
+        self.assertGreater(row["locked_pnl"], 15.0)
 
     def test_fill_and_order_normalize_legacy_fields(self):
         fill = parse_fill(
